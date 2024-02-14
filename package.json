@@ -2,6 +2,7 @@
   "name": "ludicrosity",
   "version": "1.0.0",
   "description": "ssg made for timepass",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -9,7 +10,10 @@
   "author": "vortex",
   "license": "ISC",
   "dependencies": {
+    "glob": "^10.3.10",
     "gray-matter": "^4.0.3",
-    "marked": "^11.1.1"
+    "marked": "^11.2.0",
+    "mkdirp": "^3.0.1",
+    "nodemon": "^3.0.3"
   }
 }
