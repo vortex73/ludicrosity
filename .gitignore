@@ -1,1 +1,5 @@
-/node_modules
+/zig-out
+/markdwns
+/md4c
+/zig-cache
+*.o
