@@ -2,4 +2,5 @@
 /markdwns
 /md4c
 /zig-cache
+*.html
 *.o

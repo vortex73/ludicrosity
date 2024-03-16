@@ -5,11 +5,15 @@ const md = @cImport({
     @cInclude("md4c-html.h");
 });
 
+const callback_data = struct {
+    file: fs.File,
+};
+
 pub fn callback(conv: [*c]const md.MD_CHAR, size: md.MD_SIZE, userdata: ?*anyopaque) callconv(.C) void {
-    std.debug.print("{s}", .{conv[0..size]});
-    //    _ = conv;
-    //    _ = size;
-    _ = userdata;
+    //std.debug.print("{s}", .{conv[0..size]});
+    const aligned: fs.File = @alignCast(@alignOf(userdata.?));
+    const file: *callback_data = @ptrCast(aligned);
+    _ = try file.file.write(conv[0..size]);
 }
 
 pub fn stroll(dir: []const u8) !void {
@@ -21,23 +25,28 @@ pub fn stroll(dir: []const u8) !void {
     defer walker.deinit();
 
     while (try walker.next()) |unit| {
-        if (unit.kind == .file and true) { // add check for if file is .md. reject incase filename has no extensions
-            std.debug.print("{s}\n", .{unit.path});
-
-            const fd = try fs.openFileAbsolute(unit.path, .{ .mode = .read_only });
+        if (unit.kind == .file) {
+            const fd = src_dir.openFile(unit.path, .{ .mode = .read_only }) catch |e| {
+                std.log.err("{s} Can't be opened for reading", .{unit.path});
+                return e;
+            };
             defer fd.close();
-            try ludicrous(fd);
+            try ludicrous(fd, unit.path);
         }
     }
 }
 
-pub fn ludicrous(source: fs.File) !void {
+pub fn ludicrous(source: fs.File, src_path: []const u8) !void {
     var buffboi = std.io.bufferedReader(source.reader());
     var input = buffboi.reader();
     var buffer: [2048]u8 = undefined;
-    const new: ?*anyopaque = null;
+    //const new: ?*anyopaque = null;
+    const htmlFileName = try std.fmt.allocPrint(std.heap.page_allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
+    defer std.heap.page_allocator.free(htmlFileName);
+    var htmlFile = try fs.cwd().createFile(htmlFileName, .{});
+    defer htmlFile.close();
     while (try input.readUntilDelimiterOrEof(&buffer, '\n')) |line| {
-        const val = md.md_html(line.ptr, @intCast(line.len), callback, new, @intCast(0), md.MD_HTML_FLAG_DEBUG);
+        const val = md.md_html(line.ptr, @intCast(line.len), callback, &htmlFile, @intCast(0), md.MD_HTML_FLAG_DEBUG);
         if (val == 0) {
             continue;
         } else {
@@ -53,7 +62,7 @@ pub fn main() !void {
     const curr = try std.os.getcwd(&buf);
     const alloc = std.heap.page_allocator;
     const src_dir = try fs.path.join(alloc, &[_][]const u8{ curr, "/markdwns/" });
-    std.debug.print("{s}", .{src_dir});
+    // std.debug.print("{s}", .{src_dir});
     try stroll(src_dir);
     //    defer source.close();
 }
