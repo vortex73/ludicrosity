@@ -10,10 +10,10 @@ const callback_data = struct {
 };
 
 pub fn callback(conv: [*c]const md.MD_CHAR, size: md.MD_SIZE, userdata: ?*anyopaque) callconv(.C) void {
-    //std.debug.print("{s}", .{conv[0..size]});
-    const aligned: fs.File = @alignCast(@alignOf(userdata.?));
-    const file: *callback_data = @ptrCast(aligned);
-    _ = try file.file.write(conv[0..size]);
+    const file: *callback_data = @ptrCast(@alignCast(userdata.?));
+    if (file.file.write(conv[0..size])) |_| {} else |err| {
+        std.log.err("File write failed {}", .{err});
+    }
 }
 
 pub fn stroll(dir: []const u8) !void {
