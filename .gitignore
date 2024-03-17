@@ -1,5 +1,9 @@
 /zig-out
 /markdwns
+/markdwns.bak
+/MarkdownTest_1.0.zip
+/templates
+/MarkdownTest_1.0
 /md4c
 /zig-cache
 *.html
