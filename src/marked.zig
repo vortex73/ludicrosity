@@ -15,6 +15,32 @@ pub fn callback(conv: [*c]const md.MD_CHAR, size: md.MD_SIZE, userdata: ?*anyopa
         std.log.err("File write failed {}", .{err});
     }
 }
+
+pub fn replace(file: []const u8) !void {
+    const start = std.mem.indexOf(u8, file, "<!--");
+    const end = std.mem.indexOf(u8, file, "-->");
+    if (start) |startt| {
+        if (end) |endd| {
+            const param = file[startt + 4 .. endd];
+            std.debug.print("PARAM : {s}", .{param});
+        }
+    } else {
+        std.debug.print("Not found", .{});
+    }
+}
+
+pub fn templatize() !void {
+    const alloc = std.heap.page_allocator;
+    const template = "templates/template.html";
+    const fd = fs.cwd().openFile(template, .{ .mode = .read_only }) catch |e| {
+        std.log.err("{s} Can't be opened for reading", .{template});
+        return e;
+    };
+    defer fd.close();
+    const html = try fd.readToEndAlloc(alloc, 1024 * 1024);
+    try replace(html);
+}
+
 pub fn stroll(dir: []const u8) !void {
     const allocator = std.heap.page_allocator;
     var src_dir = try fs.cwd().openDir(dir, .{ .iterate = true });
@@ -51,5 +77,6 @@ pub fn main() !void {
     const curr = try std.os.getcwd(&buf);
     const alloc = std.heap.page_allocator;
     const src_dir = try fs.path.join(alloc, &[_][]const u8{ curr, "/markdwns/" });
+    try templatize();
     try stroll(src_dir);
 }
