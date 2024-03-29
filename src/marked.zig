@@ -16,19 +16,6 @@ pub fn callback(conv: [*c]const md.MD_CHAR, size: md.MD_SIZE, userdata: ?*anyopa
     }
 }
 
-pub fn replace(file: []const u8) !void {
-    const start = std.mem.indexOf(u8, file, "<!--");
-    const end = std.mem.indexOf(u8, file, "-->");
-    if (start) |startt| {
-        if (end) |endd| {
-            const param = file[startt + 4 .. endd];
-            std.debug.print("PARAM : {s}", .{param});
-        }
-    } else {
-        std.debug.print("Not found", .{});
-    }
-}
-
 pub fn templatize() !void {
     const alloc = std.heap.page_allocator;
     const template = "templates/template.html";
@@ -37,8 +24,19 @@ pub fn templatize() !void {
         return e;
     };
     defer fd.close();
-    const html = try fd.readToEndAlloc(alloc, 1024 * 1024);
-    try replace(html);
+    var html = try fd.readToEndAlloc(alloc, 1024 * 1024);
+    while (std.mem.indexOf(u8, html, "<!--")) |start_index| {
+        if (std.mem.indexOf(u8, html, "-->")) |end_index| {
+            const param = html[start_index + 4 .. end_index];
+            std.debug.print("{s}\n", .{param});
+            //    try replace(html);
+            html = html[end_index + 3 ..];
+            continue;
+        } else {
+            std.debug.print("Unclosed CommentLine encountered in template file", .{});
+            break;
+        }
+    }
 }
 
 pub fn stroll(dir: []const u8) !void {
