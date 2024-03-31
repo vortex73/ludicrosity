@@ -15,7 +15,24 @@ pub fn callback(conv: [*c]const md.MD_CHAR, size: md.MD_SIZE, userdata: ?*anyopa
         std.log.err("File write failed {}", .{err});
     }
 }
+fn parseMetadata(allocator: std.mem.Allocator, content: []const u8) !std.StringHashMap([]const u8) {
+    var metadata = std.StringHashMap([]const u8).init(allocator);
+    defer metadata.deinit();
 
+    var lines = std.mem.split(u8, content, "\n");
+    while (lines.next()) |line| {
+        if (line.len > 0 and line[0] == '%') {
+            var parts = std.mem.split(u8, line[1..], ":");
+            const key = parts.next() orelse continue;
+            const value = parts.next() orelse continue;
+            try metadata.put(std.mem.trim(u8, key, " "), std.mem.trim(u8, value, " "));
+        } else {
+            return metadata;
+        }
+    }
+
+    return metadata;
+}
 pub fn templatize() !void {
     const alloc = std.heap.page_allocator;
     const template = "templates/template.html";
@@ -56,6 +73,17 @@ pub fn stroll(dir: []const u8) !void {
             };
             defer fd.close();
             const markdown = try fd.readToEndAlloc(read_alloc, 1024 * 1024);
+            const metadata = try parseMetadata(allocator, markdown);
+
+            var keyit = metadata.keyIterator();
+            while (keyit.next()) |item| {
+                std.debug.print("{s}", .{item});
+            }
+            //          if (metadata.get("title")) |title| {
+            //              std.debug.print("title : {any}\n", .{title});
+            //          } else {
+            //              std.debug.print("title key not found\n", .{});
+            //          }
             try ludicrous(markdown, unit.path);
         }
     }
