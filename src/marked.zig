@@ -88,7 +88,8 @@ pub fn stroll(dir: []const u8) !void {
         }
     }
 }
-
+// 💡 pass one single buffered writer instance throughout the codeflow that writes everything till the Delimiter and then writes the parsed content.
+// 💡 pass the file to the callback and write to it and write once more later.
 pub fn ludicrous(markdown: []const u8, src_path: []const u8) !void {
     const htmlFileName = try std.fmt.allocPrint(std.heap.page_allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
     defer std.heap.page_allocator.free(htmlFileName);
