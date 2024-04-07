@@ -5,8 +5,6 @@ const md = @cImport({
     @cInclude("md4c-html.h");
 });
 
-const callback_data = struct {};
-
 const Tempdata = struct {
     start: usize,
     end: usize,
@@ -35,15 +33,14 @@ fn parseMetadata(allocator: std.mem.Allocator, content: []const u8) !Metamatter 
     }
     return Metamatter{ .metadata = metadata, .index = index };
 }
-pub fn templatize() !Tempdata {
-    const alloc = std.heap.page_allocator;
-    const template = "templates/template.html";
-    const fd = fs.cwd().openFile(template, .{ .mode = .read_only }) catch |e| {
+pub fn templatize(allocator: std.mem.Allocator, src_dir: fs.Dir) !Tempdata {
+    const template = "../templates/template.html";
+    const fd = src_dir.openFile(template, .{ .mode = .read_only }) catch |e| {
         std.log.err("{s} Can't be opened for reading", .{template});
         return e;
     };
     defer fd.close();
-    const html = try fd.readToEndAlloc(alloc, 1024 * 1024);
+    const html = try fd.readToEndAlloc(allocator, 1024 * 1024);
     while (std.mem.indexOf(u8, html, "<!--")) |start_index| {
         if (std.mem.indexOf(u8, html, "-->")) |end_index| {
             //    try replace(html);
@@ -57,15 +54,14 @@ pub fn templatize() !Tempdata {
     return Tempdata{ .end = 0, .start = 0, .html = "" };
 }
 
-pub fn stroll(dir: []const u8) !void {
-    const allocator = std.heap.page_allocator;
+pub fn stroll(allocator: std.mem.Allocator, dir: []const u8) !void {
     var src_dir = try fs.cwd().openDir(dir, .{ .iterate = true });
     defer src_dir.close();
 
     var walker = try src_dir.walk(allocator);
     defer walker.deinit();
-    const read_alloc = std.heap.page_allocator;
 
+    const template = try templatize(allocator, src_dir);
     while (try walker.next()) |unit| {
         if (unit.kind == .file) {
             const fd = src_dir.openFile(unit.path, .{ .mode = .read_only }) catch |e| {
@@ -73,9 +69,8 @@ pub fn stroll(dir: []const u8) !void {
                 return e;
             };
             defer fd.close();
-            const markdown = try fd.readToEndAlloc(read_alloc, 1024 * 1024);
+            const markdown = try fd.readToEndAlloc(allocator, 1024 * 1024);
             const metamatter = try parseMetadata(allocator, markdown);
-            const template = try templatize();
 
             if (metamatter.metadata.get("title")) |title| {
                 // std.debug.print("title : {s}\n", .{title});
@@ -83,20 +78,20 @@ pub fn stroll(dir: []const u8) !void {
             } else {
                 std.debug.print("title key not found\n", .{});
             }
-            try createHtml(markdown, template, unit.path, metamatter);
+            try createHtml(allocator, markdown, template, unit.path, metamatter);
             //try ludicrous(markdown[metamatter.index + 1 ..], unit.path, template);
         }
     }
 }
 
 pub fn createHtml(
+    allocator: std.mem.Allocator,
     markdown: []const u8,
     template: Tempdata,
     src_path: []const u8,
     metamatter: Metamatter,
 ) !void {
-    const htmlFileName = try std.fmt.allocPrint(std.heap.page_allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
-    defer std.heap.page_allocator.free(htmlFileName);
+    const htmlFileName = try std.fmt.allocPrint(allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
     var htmlFile = try fs.cwd().createFile(htmlFileName, .{});
     defer htmlFile.close();
     var bufferedwriter = std.io.bufferedWriter(htmlFile.writer());
@@ -123,7 +118,9 @@ pub fn ludicrous(markdown: []const u8, scribe: anytype, writer: anytype, templat
 pub fn main() !void {
     var buf: [fs.MAX_PATH_BYTES]u8 = undefined;
     const curr = try std.os.getcwd(&buf);
-    const alloc = std.heap.page_allocator;
+    var arena_alloc = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_alloc.deinit();
+    const alloc = arena_alloc.allocator();
     const src_dir = try fs.path.join(alloc, &[_][]const u8{ curr, "/markdwns/" });
-    try stroll(src_dir);
+    try stroll(alloc, src_dir);
 }
