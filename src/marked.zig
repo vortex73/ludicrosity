@@ -5,9 +5,7 @@ const md = @cImport({
     @cInclude("md4c-html.h");
 });
 
-const callback_data = struct {
-    file: fs.File,
-};
+const callback_data = struct {};
 
 const Tempdata = struct {
     start: usize,
@@ -20,12 +18,6 @@ const Metamatter = struct {
     index: usize,
 };
 
-pub fn callback(conv: [*c]const md.MD_CHAR, size: md.MD_SIZE, userdata: ?*anyopaque) callconv(.C) void {
-    const file: *callback_data = @ptrCast(@alignCast(userdata.?));
-    if (file.file.write(conv[0..size])) |_| {} else |err| {
-        std.log.err("File write failed {}", .{err});
-    }
-}
 fn parseMetadata(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
     var metadata = std.StringHashMap([]const u8).init(allocator);
     var index: usize = 0;
@@ -43,7 +35,6 @@ fn parseMetadata(allocator: std.mem.Allocator, content: []const u8) !Metamatter 
     }
     return Metamatter{ .metadata = metadata, .index = index };
 }
-// 💡 Modify templatize to loop till all param comments are identified.
 pub fn templatize() !Tempdata {
     const alloc = std.heap.page_allocator;
     const template = "templates/template.html";
@@ -92,20 +83,40 @@ pub fn stroll(dir: []const u8) !void {
             } else {
                 std.debug.print("title key not found\n", .{});
             }
-            try ludicrous(markdown[metamatter.index + 1 ..], unit.path, template);
+            try createHtml(markdown, template, unit.path, metamatter);
+            //try ludicrous(markdown[metamatter.index + 1 ..], unit.path, template);
         }
     }
 }
-// 💡 pass one single buffered writer instance throughout the codeflow that writes everything till the Delimiter and then writes the parsed content.
-// 💡 pass the file to the callback and write to it and write once more later.
-pub fn ludicrous(markdown: []const u8, src_path: []const u8, template: Tempdata) !void {
+
+pub fn createHtml(
+    markdown: []const u8,
+    template: Tempdata,
+    src_path: []const u8,
+    metamatter: Metamatter,
+) !void {
     const htmlFileName = try std.fmt.allocPrint(std.heap.page_allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
     defer std.heap.page_allocator.free(htmlFileName);
-    var htmlFile = try fs.cwd().createFile(htmlFileName, .{ .truncate = false });
+    var htmlFile = try fs.cwd().createFile(htmlFileName, .{});
     defer htmlFile.close();
-    _ = try htmlFile.write(template.html[0..template.start]);
-    const val = md.md_html(markdown.ptr, @intCast(markdown.len), callback, &htmlFile, @intCast(0), md.MD_HTML_FLAG_DEBUG);
-    _ = try htmlFile.write(template.html[template.end + 3 ..]);
+    var bufferedwriter = std.io.bufferedWriter(htmlFile.writer());
+    try ludicrous(markdown[metamatter.index + 1 ..], &bufferedwriter, bufferedwriter.writer(), template);
+    try bufferedwriter.flush();
+}
+pub fn ludicrous(markdown: []const u8, scribe: anytype, writer: anytype, template: Tempdata) !void {
+    const x = struct {
+        fn callback(conv: [*c]const md.MD_CHAR, size: md.MD_SIZE, userdata: ?*anyopaque) callconv(.C) void {
+            const file: *@TypeOf(writer) = @ptrCast(@alignCast(userdata.?));
+            if (file.write(conv[0..size])) |_| {} else |err| {
+                std.log.err("File write failed {}", .{err});
+            }
+        }
+    };
+    _ = try scribe.write(template.html[0..template.start]);
+    //_ = try htmlFile.write(template.html[0..template.start]);
+    const val = md.md_html(markdown.ptr, @intCast(markdown.len), x.callback, @ptrCast(@constCast(&writer)), @intCast(0), md.MD_HTML_FLAG_DEBUG);
+    _ = try scribe.write(template.html[template.end + 3 ..]);
+    //_ = try htmlFile.write(template.html[template.end + 3 ..]);
     _ = val;
 }
 
