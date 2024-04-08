@@ -33,8 +33,7 @@ fn parseMetadata(allocator: std.mem.Allocator, content: []const u8) !Metamatter 
     }
     return Metamatter{ .metadata = metadata, .index = index };
 }
-pub fn templatize(allocator: std.mem.Allocator, template: fs.File) !Tempdata {
-    const html = try template.readToEndAlloc(allocator, 1024 * 1024);
+pub fn templatize(html: []const u8) !Tempdata {
     while (std.mem.indexOf(u8, html, "<!--")) |start_index| {
         if (std.mem.indexOf(u8, html, "-->")) |end_index| {
             //    try replace(html);
@@ -48,14 +47,14 @@ pub fn templatize(allocator: std.mem.Allocator, template: fs.File) !Tempdata {
     return Tempdata{ .end = 0, .start = 0, .html = "" };
 }
 
-pub fn stroll(allocator: std.mem.Allocator, dir: []const u8, tempFile: fs.File) !void {
+pub fn stroll(allocator: std.mem.Allocator, dir: []const u8, tempFile: []const u8) !void {
     var src_dir = try fs.cwd().openDir(dir, .{ .iterate = true });
     defer src_dir.close();
 
     var walker = try src_dir.walk(allocator);
     defer walker.deinit();
 
-    const template = try templatize(allocator, tempFile);
+    const template = try templatize(tempFile);
     while (try walker.next()) |unit| {
         if (unit.kind == .file) {
             const fd = src_dir.openFile(unit.path, .{ .mode = .read_only }) catch |e| {
@@ -66,19 +65,12 @@ pub fn stroll(allocator: std.mem.Allocator, dir: []const u8, tempFile: fs.File) 
             const markdown = try fd.readToEndAlloc(allocator, 1024 * 1024);
             const metamatter = try parseMetadata(allocator, markdown);
 
-            if (metamatter.metadata.get("title")) |title| {
-                // std.debug.print("title : {s}\n", .{title});
-                _ = title;
-            } else {
-                std.debug.print("title key not found\n", .{});
-            }
             try createHtml(allocator, markdown, template, unit.path, metamatter);
-            //try ludicrous(markdown[metamatter.index + 1 ..], unit.path, template);
         }
     }
 }
 
-pub fn bufwriter(underlying_stream: anytype) io.BufferedWriter(8000, @TypeOf(underlying_stream)) {
+pub fn bufwriter(underlying_stream: anytype) io.BufferedWriter(8192, @TypeOf(underlying_stream)) {
     return .{ .unbuffered_writer = underlying_stream };
 }
 
@@ -106,11 +98,10 @@ pub fn ludicrous(markdown: []const u8, scribe: anytype, writer: anytype, templat
             }
         }
     };
+    // templatize even title and other metamatter.
     _ = try scribe.write(template.html[0..template.start]);
-    //_ = try htmlFile.write(template.html[0..template.start]);
     const val = md.md_html(markdown.ptr, @intCast(markdown.len), x.callback, @ptrCast(@constCast(&writer)), @intCast(0), md.MD_HTML_FLAG_DEBUG);
     _ = try scribe.write(template.html[template.end + 3 ..]);
-    //_ = try htmlFile.write(template.html[template.end + 3 ..]);
     _ = val;
 }
 
@@ -126,5 +117,6 @@ pub fn main() !void {
         return e;
     };
     defer fd.close();
-    try stroll(alloc, "markdwns/", fd);
+    const html = try fd.readToEndAlloc(alloc, 1024 * 1024);
+    try stroll(alloc, "markdwns/", html);
 }
