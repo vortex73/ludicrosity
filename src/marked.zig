@@ -12,12 +12,12 @@ const Tempdata = struct {
 };
 
 const Metamatter = struct {
-    metadata: std.StringHashMap([]const u8),
+    metadata: std.StringHashMapUnmanaged([]const u8),
     index: usize,
 };
 
 fn parseMetadata(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
-    var metadata = std.StringHashMap([]const u8).init(allocator);
+    var metadata = std.StringHashMapUnmanaged([]const u8){};
     var index: usize = 0;
     var lines = std.mem.split(u8, content, "\n");
     while (lines.next()) |line| {
@@ -25,7 +25,7 @@ fn parseMetadata(allocator: std.mem.Allocator, content: []const u8) !Metamatter 
             var parts = std.mem.split(u8, line[1..], ":");
             const key = parts.next() orelse continue;
             const value = parts.next() orelse continue;
-            try metadata.put(std.mem.trim(u8, key, " "), std.mem.trim(u8, value, " "));
+            try metadata.put(allocator, std.mem.trim(u8, key, " "), std.mem.trim(u8, value, " "));
             index += line.len + 1;
         } else {
             return Metamatter{ .metadata = metadata, .index = index };
@@ -33,14 +33,8 @@ fn parseMetadata(allocator: std.mem.Allocator, content: []const u8) !Metamatter 
     }
     return Metamatter{ .metadata = metadata, .index = index };
 }
-pub fn templatize(allocator: std.mem.Allocator, src_dir: fs.Dir) !Tempdata {
-    const template = "../templates/template.html";
-    const fd = src_dir.openFile(template, .{ .mode = .read_only }) catch |e| {
-        std.log.err("{s} Can't be opened for reading", .{template});
-        return e;
-    };
-    defer fd.close();
-    const html = try fd.readToEndAlloc(allocator, 1024 * 1024);
+pub fn templatize(allocator: std.mem.Allocator, template: fs.File) !Tempdata {
+    const html = try template.readToEndAlloc(allocator, 1024 * 1024);
     while (std.mem.indexOf(u8, html, "<!--")) |start_index| {
         if (std.mem.indexOf(u8, html, "-->")) |end_index| {
             //    try replace(html);
@@ -54,14 +48,14 @@ pub fn templatize(allocator: std.mem.Allocator, src_dir: fs.Dir) !Tempdata {
     return Tempdata{ .end = 0, .start = 0, .html = "" };
 }
 
-pub fn stroll(allocator: std.mem.Allocator, dir: []const u8) !void {
+pub fn stroll(allocator: std.mem.Allocator, dir: []const u8, tempFile: fs.File) !void {
     var src_dir = try fs.cwd().openDir(dir, .{ .iterate = true });
     defer src_dir.close();
 
     var walker = try src_dir.walk(allocator);
     defer walker.deinit();
 
-    const template = try templatize(allocator, src_dir);
+    const template = try templatize(allocator, tempFile);
     while (try walker.next()) |unit| {
         if (unit.kind == .file) {
             const fd = src_dir.openFile(unit.path, .{ .mode = .read_only }) catch |e| {
@@ -116,11 +110,14 @@ pub fn ludicrous(markdown: []const u8, scribe: anytype, writer: anytype, templat
 }
 
 pub fn main() !void {
-    var buf: [fs.MAX_PATH_BYTES]u8 = undefined;
-    const curr = try std.os.getcwd(&buf);
     var arena_alloc = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_alloc.deinit();
     const alloc = arena_alloc.allocator();
-    const src_dir = try fs.path.join(alloc, &[_][]const u8{ curr, "/markdwns/" });
-    try stroll(alloc, src_dir);
+    const template = "./templates/template.html";
+    const fd = fs.cwd().openFile(template, .{ .mode = .read_only }) catch |e| {
+        std.log.err("{s} Can't be opened for reading", .{template});
+        return e;
+    };
+    defer fd.close();
+    try stroll(alloc, "markdwns/", fd);
 }
