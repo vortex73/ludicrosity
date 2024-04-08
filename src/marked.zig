@@ -78,6 +78,10 @@ pub fn stroll(allocator: std.mem.Allocator, dir: []const u8, tempFile: fs.File) 
     }
 }
 
+pub fn bufwriter(underlying_stream: anytype) io.BufferedWriter(8000, @TypeOf(underlying_stream)) {
+    return .{ .unbuffered_writer = underlying_stream };
+}
+
 pub fn createHtml(
     allocator: std.mem.Allocator,
     markdown: []const u8,
@@ -88,7 +92,8 @@ pub fn createHtml(
     const htmlFileName = try std.fmt.allocPrint(allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
     var htmlFile = try fs.cwd().createFile(htmlFileName, .{});
     defer htmlFile.close();
-    var bufferedwriter = std.io.bufferedWriter(htmlFile.writer());
+
+    var bufferedwriter = bufwriter(htmlFile.writer());
     try ludicrous(markdown[metamatter.index + 1 ..], &bufferedwriter, bufferedwriter.writer(), template);
     try bufferedwriter.flush();
 }
@@ -110,9 +115,11 @@ pub fn ludicrous(markdown: []const u8, scribe: anytype, writer: anytype, templat
 }
 
 pub fn main() !void {
-    var arena_alloc = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena_alloc.deinit();
-    const alloc = arena_alloc.allocator();
+    //var arena_alloc = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    //defer arena_alloc.deinit();
+    //const alloc = arena_alloc.allocator();
+    //No Safety. CAUTION.
+    const alloc = std.heap.c_allocator;
     const template = "./templates/template.html";
     const fd = fs.cwd().openFile(template, .{ .mode = .read_only }) catch |e| {
         std.log.err("{s} Can't be opened for reading", .{template});
