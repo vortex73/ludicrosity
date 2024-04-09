@@ -24,7 +24,9 @@ fn parseMetadata(allocator: std.mem.Allocator, content: []const u8) !Metamatter 
         if (line.len > 0 and line[0] == '%') {
             var parts = std.mem.split(u8, line[1..], ":");
             const key = parts.next() orelse continue;
+            std.debug.print("{s}\n", .{key});
             const value = parts.next() orelse continue;
+            std.debug.print("{s}\n", .{value});
             try metadata.put(allocator, std.mem.trim(u8, key, " "), std.mem.trim(u8, value, " "));
             index += line.len + 1;
         } else {
@@ -32,19 +34,6 @@ fn parseMetadata(allocator: std.mem.Allocator, content: []const u8) !Metamatter 
         }
     }
     return Metamatter{ .metadata = metadata, .index = index };
-}
-pub fn templatize(html: []const u8) !Tempdata {
-    while (std.mem.indexOf(u8, html, "<!--")) |start_index| {
-        if (std.mem.indexOf(u8, html, "-->")) |end_index| {
-            //    try replace(html);
-            //html = html[end_index + 3 ..];
-            return Tempdata{ .end = end_index, .start = start_index, .html = html };
-        } else {
-            std.debug.print("Unclosed CommentLine encountered in template file", .{});
-            return Tempdata{ .end = 0, .start = 0, .html = "" };
-        }
-    }
-    return Tempdata{ .end = 0, .start = 0, .html = "" };
 }
 
 pub fn stroll(allocator: std.mem.Allocator, dir: []const u8, tempFile: []const u8) !void {
@@ -54,7 +43,6 @@ pub fn stroll(allocator: std.mem.Allocator, dir: []const u8, tempFile: []const u
     var walker = try src_dir.walk(allocator);
     defer walker.deinit();
 
-    const template = try templatize(tempFile);
     while (try walker.next()) |unit| {
         if (unit.kind == .file) {
             const fd = src_dir.openFile(unit.path, .{ .mode = .read_only }) catch |e| {
@@ -65,31 +53,31 @@ pub fn stroll(allocator: std.mem.Allocator, dir: []const u8, tempFile: []const u
             const markdown = try fd.readToEndAlloc(allocator, 1024 * 1024);
             const metamatter = try parseMetadata(allocator, markdown);
 
-            try createHtml(allocator, markdown, template, unit.path, metamatter);
+            try createHtml(allocator, markdown, unit.path, metamatter, tempFile);
         }
     }
 }
 
-pub fn bufwriter(underlying_stream: anytype) io.BufferedWriter(8192, @TypeOf(underlying_stream)) {
+pub fn bufwriter(underlying_stream: anytype) io.BufferedWriter(16384, @TypeOf(underlying_stream)) {
     return .{ .unbuffered_writer = underlying_stream };
 }
 
 pub fn createHtml(
     allocator: std.mem.Allocator,
     markdown: []const u8,
-    template: Tempdata,
     src_path: []const u8,
     metamatter: Metamatter,
+    html: []const u8,
 ) !void {
     const htmlFileName = try std.fmt.allocPrint(allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
     var htmlFile = try fs.cwd().createFile(htmlFileName, .{});
     defer htmlFile.close();
 
     var bufferedwriter = bufwriter(htmlFile.writer());
-    try ludicrous(markdown[metamatter.index + 1 ..], &bufferedwriter, bufferedwriter.writer(), template);
+    try ludicrous(markdown[metamatter.index + 1 ..], &bufferedwriter, bufferedwriter.writer(), metamatter, html);
     try bufferedwriter.flush();
 }
-pub fn ludicrous(markdown: []const u8, scribe: anytype, writer: anytype, template: Tempdata) !void {
+pub fn ludicrous(markdown: []const u8, scribe: anytype, writer: anytype, metamatter: Metamatter, html: []const u8) !void {
     const x = struct {
         fn callback(conv: [*c]const md.MD_CHAR, size: md.MD_SIZE, userdata: ?*anyopaque) callconv(.C) void {
             const file: *@TypeOf(writer) = @ptrCast(@alignCast(userdata.?));
@@ -98,11 +86,22 @@ pub fn ludicrous(markdown: []const u8, scribe: anytype, writer: anytype, templat
             }
         }
     };
-    // templatize even title and other metamatter.
-    _ = try scribe.write(template.html[0..template.start]);
-    const val = md.md_html(markdown.ptr, @intCast(markdown.len), x.callback, @ptrCast(@constCast(&writer)), @intCast(0), md.MD_HTML_FLAG_DEBUG);
-    _ = try scribe.write(template.html[template.end + 3 ..]);
-    _ = val;
+    var pointer: []const u8 = html;
+    while (std.mem.indexOf(u8, pointer, "<!--")) |start_index| {
+        _ = try scribe.write(pointer[0..start_index]);
+        if (std.mem.indexOf(u8, pointer, "-->")) |end_index| {
+            if (!std.mem.eql(u8, pointer[start_index + 4 .. end_index], "BODY")) {
+                _ = try scribe.write(metamatter.metadata.get(pointer[start_index + 4 .. end_index]) orelse "");
+                pointer = pointer[end_index + 3 ..];
+            } else {
+                _ = md.md_html(markdown.ptr, @intCast(markdown.len), x.callback, @ptrCast(@constCast(&writer)), @intCast(0), md.MD_HTML_FLAG_DEBUG);
+                pointer = pointer[end_index + 3 ..];
+            }
+        } else {
+            std.debug.print("Unclosed CommentLine encountered in template file", .{});
+        }
+    }
+    _ = try scribe.write(pointer[0..]);
 }
 
 pub fn main() !void {
