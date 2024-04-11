@@ -5,35 +5,37 @@ const md = @cImport({
     @cInclude("md4c-html.h");
 });
 
-const Tempdata = struct {
-    start: usize,
-    end: usize,
-    html: []const u8,
-};
-
 const Metamatter = struct {
     metadata: std.StringHashMapUnmanaged([]const u8),
     index: usize,
+    tags: std.ArrayList([]const u8),
 };
 
 fn parseMetadata(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
     var metadata = std.StringHashMapUnmanaged([]const u8){};
+    var tagger = std.ArrayList([]const u8).init(allocator);
     var index: usize = 0;
     var lines = std.mem.split(u8, content, "\n");
     while (lines.next()) |line| {
         if (line.len > 0 and line[0] == '%') {
             var parts = std.mem.split(u8, line[1..], ":");
             const key = parts.next() orelse continue;
-            std.debug.print("{s}\n", .{key});
             const value = parts.next() orelse continue;
-            std.debug.print("{s}\n", .{value});
-            try metadata.put(allocator, std.mem.trim(u8, key, " "), std.mem.trim(u8, value, " "));
+            if (std.mem.eql(u8, std.mem.trim(u8, key, " "), "tags")) {
+                var taglist = std.mem.split(u8, value[0..], ",");
+                while (true) {
+                    const tag = taglist.next() orelse break;
+                    try tagger.append(tag);
+                }
+            } else {
+                try metadata.put(allocator, std.mem.trim(u8, key, " "), std.mem.trim(u8, value, " "));
+            }
             index += line.len + 1;
         } else {
-            return Metamatter{ .metadata = metadata, .index = index };
+            return Metamatter{ .metadata = metadata, .index = index, .tags = tagger };
         }
     }
-    return Metamatter{ .metadata = metadata, .index = index };
+    return Metamatter{ .metadata = metadata, .index = index, .tags = tagger };
 }
 
 pub fn stroll(allocator: std.mem.Allocator, dir: []const u8, tempFile: []const u8) !void {
@@ -58,17 +60,11 @@ pub fn stroll(allocator: std.mem.Allocator, dir: []const u8, tempFile: []const u
     }
 }
 
-pub fn bufwriter(underlying_stream: anytype) io.BufferedWriter(16384, @TypeOf(underlying_stream)) {
+pub fn bufwriter(underlying_stream: anytype) io.BufferedWriter(1024 * 64, @TypeOf(underlying_stream)) {
     return .{ .unbuffered_writer = underlying_stream };
 }
 
-pub fn createHtml(
-    allocator: std.mem.Allocator,
-    markdown: []const u8,
-    src_path: []const u8,
-    metamatter: Metamatter,
-    html: []const u8,
-) !void {
+pub fn createHtml(allocator: std.mem.Allocator, markdown: []const u8, src_path: []const u8, metamatter: Metamatter, html: []const u8) !void {
     const htmlFileName = try std.fmt.allocPrint(allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
     var htmlFile = try fs.cwd().createFile(htmlFileName, .{});
     defer htmlFile.close();
@@ -91,6 +87,15 @@ pub fn ludicrous(markdown: []const u8, scribe: anytype, writer: anytype, metamat
         _ = try scribe.write(pointer[0..start_index]);
         if (std.mem.indexOf(u8, pointer, "-->")) |end_index| {
             if (!std.mem.eql(u8, pointer[start_index + 4 .. end_index], "BODY")) {
+                if (std.mem.eql(u8, pointer[start_index + 4 .. end_index], "tags")) {
+                    var list = metamatter.tags;
+                    var buff: [256]u8 = undefined;
+                    while (true) {
+                        const tag = list.popOrNull() orelse break;
+                        const bufw = try std.fmt.bufPrint(&buff, "<li>{s}</li> ", .{std.mem.trim(u8, tag, " ")});
+                        _ = try scribe.write(bufw);
+                    }
+                } else {}
                 _ = try scribe.write(metamatter.metadata.get(pointer[start_index + 4 .. end_index]) orelse "");
                 pointer = pointer[end_index + 3 ..];
             } else {
@@ -105,10 +110,6 @@ pub fn ludicrous(markdown: []const u8, scribe: anytype, writer: anytype, metamat
 }
 
 pub fn main() !void {
-    //var arena_alloc = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    //defer arena_alloc.deinit();
-    //const alloc = arena_alloc.allocator();
-    //No Safety. CAUTION.
     const alloc = std.heap.c_allocator;
     const template = "./templates/template.html";
     const fd = fs.cwd().openFile(template, .{ .mode = .read_only }) catch |e| {
