@@ -18,12 +18,13 @@ zig build -Doptimize=ReleaseSafe
 Ludicrosity looks for the following source tree:
 
 ```
-/
-|-- markdwns
-|   |-- (all your markdown source files)
-|-- templates
-|   |-- template.html
-|-- tags(coming soon)
+.
+├── markdwns
+│   └── post0.md
+├── tags(coming soon)
+└── template
+    └── template.html
+
 ```
 
 ## Metamatter
