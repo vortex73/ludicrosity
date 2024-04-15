@@ -8,7 +8,7 @@ A Static Site Generator in Zig
 
 # Installation
 
-[>] To ensure seamless builds please download the dev release of the zig compiler
+> To ensure seamless builds please download the dev release of the zig compiler
 
 ```bash
 zig build -Doptimize=ReleaseSafe
@@ -38,7 +38,7 @@ Ludicrosity uses a flavor of metadata inspired from [Pandoc](https://pandoc.org/
 
 ... and you write the rest of the post in good ol' markdown.
 
-## Tempating
+## Templating
 No need to learn a new syntax for templating. No. Just use HTML Comments like so:
 
 ```html
@@ -54,4 +54,4 @@ No need to learn a new syntax for templating. No. Just use HTML Comments like so
 </body>
 ```
 
-[>] For metamatter fields remember to employ same naming conventions within template comments. `BODY` is reserved for post content.
+>  For metamatter fields remember to employ same naming conventions within template comments. `BODY` is reserved for post content.
