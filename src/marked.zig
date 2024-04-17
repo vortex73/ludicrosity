@@ -20,10 +20,6 @@ pub fn bufWriter(underlying_stream: anytype) io.BufferedWriter(1024 * 128, @Type
     return .{ .unbuffered_writer = underlying_stream };
 }
 
-pub fn bufReader(reader: anytype) io.BufferedReader(1024 * 1024, @TypeOf(reader)) {
-    return .{ .unbuffered_reader = reader };
-}
-
 pub fn collectTag(allocator: std.mem.Allocator, metamatter: Metamatter) !void {
     for (metamatter.tags.items) |tag| {
         if (tagmap.getPtr(tag)) |entry| {
@@ -187,9 +183,11 @@ pub fn main() !void {
     // Literally calls the libc malloc/free
     //const allocator = std.heap.raw_c_allocator;
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.raw_c_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    //    var arena = std.heap.ArenaAllocator.init(std.heap.raw_c_allocator);
+    //    defer arena.deinit();
+    //    const allocator = arena.allocator();
     var src_dir = try fs.cwd().openDir(".", .{ .iterate = true });
     defer src_dir.close();
     const template = src_dir.openFile("./templates/template.html", .{ .mode = .read_only }) catch |err| {
