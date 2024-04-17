@@ -120,8 +120,8 @@ pub fn stroll(allocator: std.mem.Allocator, dir: fs.Dir, html: []const u8) !void
 
     while (try stroller.next()) |unit| {
         if (unit.kind == .file) {
-            const path = try std.fmt.allocPrint(allocator, "./content/{s}", .{unit.path});
-            defer allocator.free(path);
+            var buffer: [fs.MAX_PATH_BYTES]u8 = undefined;
+            const path = try std.fmt.bufPrint(&buffer, "./content/{s}", .{unit.path});
             const fd = dir.openFile(path, .{ .mode = .read_only }) catch |err| {
                 std.log.err("{s} can't be opened for reading. Please check file permissions.", .{unit.path});
                 return err;
@@ -172,7 +172,9 @@ fn parser(markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: [
 
 pub fn main() !void {
     // Literally calls the libc malloc/free
-    const allocator = std.heap.raw_c_allocator;
+    //const allocator = std.heap.raw_c_allocator;
+    var alloc = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = alloc.allocator();
     var src_dir = try fs.cwd().openDir(".", .{ .iterate = true });
     defer src_dir.close();
     const template = src_dir.openFile("./templates/template.html", .{ .mode = .read_only }) catch |err| {
@@ -188,7 +190,7 @@ pub fn main() !void {
     var tag_dir = try src_dir.openDir("tags", .{});
     defer tag_dir.close();
     const html = try template.readToEndAlloc(allocator, 1024 * 1024);
-    allocator.free(html);
+    defer allocator.free(html);
     tagmap = @TypeOf(tagmap).init(allocator);
     defer tagmap.deinit();
     try stroll(allocator, src_dir, html);
