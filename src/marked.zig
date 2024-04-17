@@ -45,8 +45,9 @@ fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir) !void {
     const html = try template.readToEndAlloc(allocator, 1024 * 1024);
     defer allocator.free(html);
     while (hash_iter.next()) |entry| {
+        const path = entry.key_ptr.*;
         var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-        const file = try std.fmt.bufPrint(&buffer, "./{s}.html", .{entry.key_ptr.*});
+        const file = try std.fmt.bufPrint(&buffer, "./{s}.html", .{path});
         var fd = try dir.createFile(file, .{});
         defer fd.close();
         var writer = bufWriter(fd.writer());
@@ -59,6 +60,9 @@ fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir) !void {
             const string = try std.fmt.allocPrint(allocator, "<h2>{s}</h2>", .{item.get("title") orelse ""});
             _ = try writer.write(string);
         }
+        if (std.mem.indexOf(u8, html, "<!--")) |index| {
+            _ = try writer.write(html[index + 11 ..]);
+        }
         try writer.flush();
     }
 }
@@ -66,6 +70,7 @@ fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir) !void {
 fn parseMeta(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
     var metadata = std.StringHashMap([]const u8).init(allocator);
     var tagList = std.ArrayList([]const u8).init(allocator);
+    errdefer tagList.deinit();
     var index: usize = 0;
     var lines = std.mem.splitSequence(u8, content, "\n");
     while (lines.next()) |line| {
@@ -78,8 +83,10 @@ fn parseMeta(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
             if (std.mem.eql(u8, key_trim, "tags")) {
                 // do tags here
                 var tags = std.mem.splitSequence(u8, val[0..], ",");
+                var int: usize = 0;
                 while (tags.next()) |tag| {
-                    try tagList.append(tag);
+                    try tagList.insert(int, tag);
+                    int += 1;
                 }
             } else {
                 try metadata.put(key_trim, val_trim);
@@ -94,7 +101,7 @@ fn parseMeta(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
 
 pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, dir: fs.Dir, html: []const u8) !void {
     const markdown = try fd.readToEndAlloc(allocator, 1024 * 1024);
-    defer allocator.free(markdown);
+    _ = try allocator.dupe(u8, markdown);
     // pass the file to be parsed.
     const metamatter = try parseMeta(allocator, markdown);
     try collectTag(allocator, metamatter);
@@ -173,8 +180,10 @@ fn parser(markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: [
 pub fn main() !void {
     // Literally calls the libc malloc/free
     //const allocator = std.heap.raw_c_allocator;
-    var alloc = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = alloc.allocator();
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.raw_c_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     var src_dir = try fs.cwd().openDir(".", .{ .iterate = true });
     defer src_dir.close();
     const template = src_dir.openFile("./templates/template.html", .{ .mode = .read_only }) catch |err| {
