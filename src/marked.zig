@@ -43,9 +43,10 @@ fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir) !void {
     };
     defer template.close();
     const html = try template.readToEndAlloc(allocator, 1024 * 1024);
-    allocator.free(html);
+    defer allocator.free(html);
     while (hash_iter.next()) |entry| {
-        const file = try std.fmt.allocPrint(allocator, "./{s}.html", .{entry.key_ptr.*});
+        var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        const file = try std.fmt.bufPrint(&buffer, "./{s}.html", .{entry.key_ptr.*});
         var fd = try dir.createFile(file, .{});
         defer fd.close();
         var writer = bufWriter(fd.writer());
