@@ -80,11 +80,14 @@ fn parseMeta(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
             const val = parts.next() orelse continue;
             const key_trim = std.mem.trim(u8, key, " ");
             const val_trim = std.mem.trim(u8, val, " ");
+            _ = try allocator.dupe(u8, key_trim);
+            _ = try allocator.dupe(u8, val_trim);
             if (std.mem.eql(u8, key_trim, "tags")) {
                 // do tags here
                 var tags = std.mem.splitSequence(u8, val[0..], ",");
                 var int: usize = 0;
                 while (tags.next()) |tag| {
+                    _ = try allocator.dupe(u8, tag);
                     try tagList.insert(int, tag);
                     int += 1;
                 }
@@ -103,7 +106,6 @@ pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, 
     const reader = fd.reader();
     try reader.readAllArrayList(markdown, 0xffff_ffff);
     defer markdown.clearRetainingCapacity();
-    _ = try allocator.dupe(u8, markdown.items);
     // pass the file to be parsed.
     const metamatter = try parseMeta(allocator, markdown.items);
     try collectTag(allocator, metamatter);
@@ -119,6 +121,7 @@ pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, 
 
 pub fn stroll(allocator: std.mem.Allocator, dir: fs.Dir, html: []const u8) !void {
     var markdown = std.ArrayList(u8).init(allocator);
+    markdown.deinit();
     var content_dir = dir.openDir("./content", .{ .iterate = true }) catch |err| {
         std.log.err("Unable to open the content directory: {}", .{err});
         return err;
