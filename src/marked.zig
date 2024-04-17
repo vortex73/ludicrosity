@@ -5,129 +5,137 @@ const md = @cImport({
     @cInclude("md4c-html.h");
 });
 
-// Refactor: free the arraylist and hashmaps
-// 15/04 : tag hashmaps printing garbage values in createtags function
-// possible memory leaks
-// test code to print at different locations :
-// var iter = new_tagger.tagmap.iterator();
-// while (iter.next()) |val| {
-//     std.debug.print("{s}", .{val.key_ptr.*});
-// }
+const CONTENT = "content/";
+const TEMPLATE = "./templates/template.html";
 
 const Metamatter = struct {
-    metadata: std.StringHashMapUnmanaged([]const u8),
+    metadata: std.StringHashMap([]const u8),
     index: usize,
     tags: std.ArrayList([]const u8),
 };
-const Tagger = struct {
-    tagmap: std.StringHashMap(std.ArrayList([]const u8)),
-};
 
-fn parseMetadata(allocator: std.mem.Allocator, content: []const u8, taghash: *Tagger) !Metamatter {
-    var metadata = std.StringHashMapUnmanaged([]const u8){};
-    var tagger = std.ArrayList([]const u8).init(allocator);
-    //var tagh = taghash;
-    var index: usize = 0;
-    var lines = std.mem.split(u8, content, "\n");
-    var title: []const u8 = undefined;
-    while (lines.next()) |line| {
-        if (line.len > 0 and line[0] == '%') {
-            var parts = std.mem.split(u8, line[1..], ":");
-            const key = parts.next() orelse continue;
-            const value = parts.next() orelse continue;
-            if (std.mem.eql(u8, std.mem.trim(u8, key, " "), "title")) title = value;
-            if (std.mem.eql(u8, std.mem.trim(u8, key, " "), "tags")) {
-                var taglist = std.mem.split(u8, value[0..], ",");
-                while (true) {
-                    const tag = taglist.next() orelse break;
-                    try tagger.append(tag);
-                    if (taghash.*.tagmap.getPtr(tag)) |post| {
-                        try post.append(title);
-                    } else {
-                        var newposts = std.ArrayList([]const u8).init(allocator);
-                        defer newposts.deinit();
-                        try newposts.append(title);
-                        try taghash.*.tagmap.put(tag, newposts);
-                    }
-                }
-            } else {
-                try metadata.put(allocator, std.mem.trim(u8, key, " "), std.mem.trim(u8, value, " "));
-            }
-            index += line.len + 1;
-        } else {
-            return Metamatter{ .metadata = metadata, .index = index, .tags = tagger };
-        }
-    }
-    return Metamatter{ .metadata = metadata, .index = index, .tags = tagger };
-}
+pub var tagmap: std.StringHashMap(std.ArrayList(std.StringHashMap([]const u8))) = undefined;
 
-pub fn stroll(allocator: std.mem.Allocator, dir: []const u8, tempFile: []const u8, tagger: *Tagger) !Tagger {
-    var src_dir = try fs.cwd().openDir(dir, .{ .iterate = true });
-    defer src_dir.close();
-
-    var walker = try src_dir.walk(allocator);
-    defer walker.deinit();
-
-    while (try walker.next()) |unit| {
-        if (unit.kind == .file) {
-            const fd = src_dir.openFile(unit.path, .{ .mode = .read_only }) catch |e| {
-                std.log.err("{s} Can't be opened for reading", .{unit.path});
-                return e;
-            };
-            defer fd.close();
-            const markdown = try fd.readToEndAlloc(allocator, 1024 * 1024);
-            defer allocator.free(markdown);
-            const metamatter = try parseMetadata(allocator, markdown, tagger);
-            try createHtml(allocator, markdown, unit.path, metamatter, tempFile, src_dir, tagger);
-        }
-    }
-    return tagger.*;
-}
-
-pub fn bufwriter(underlying_stream: anytype) io.BufferedWriter(1024 * 64, @TypeOf(underlying_stream)) {
+pub fn bufWriter(underlying_stream: anytype) io.BufferedWriter(1024 * 128, @TypeOf(underlying_stream)) {
     return .{ .unbuffered_writer = underlying_stream };
 }
 
-pub fn createHtml(allocator: std.mem.Allocator, markdown: []const u8, src_path: []const u8, metamatter: Metamatter, html: []const u8, src_dir: fs.Dir, tagger: *Tagger) !void {
-    // refactor this
-    const htmlFileName = try std.fmt.allocPrint(allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
-    defer allocator.free(htmlFileName);
-    var htmlFile = try fs.cwd().createFile(htmlFileName, .{});
-    defer htmlFile.close();
+pub fn bufReader(reader: anytype) io.BufferedReader(1024 * 1024, @TypeOf(reader)) {
+    return .{ .unbuffered_reader = reader };
+}
 
-    var bufferedwriter = bufwriter(htmlFile.writer());
-    try ludicrous(allocator, markdown[metamatter.index + 1 ..], &bufferedwriter, bufferedwriter.writer(), metamatter, html, src_dir, tagger);
+pub fn collectTag(allocator: std.mem.Allocator, metamatter: Metamatter) !void {
+    for (metamatter.tags.items) |tag| {
+        if (tagmap.getPtr(tag)) |entry| {
+            try entry.append(metamatter.metadata);
+        } else {
+            var newposts = std.ArrayList(std.StringHashMap([]const u8)).init(allocator);
+            try newposts.append(metamatter.metadata);
+            try tagmap.put(tag, newposts);
+        }
+    }
+}
+fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir) !void {
+    var hash_iter = tagmap.iterator();
+    const template = dir.openFile("../templates/tag.html", .{ .mode = .read_only }) catch |err| {
+        std.log.err("Unable to open template for reading. Please check permissions. {}", .{err});
+        return err;
+    };
+    defer template.close();
+    const html = try template.readToEndAlloc(allocator, 1024 * 1024);
+    allocator.free(html);
+    while (hash_iter.next()) |entry| {
+        const file = try std.fmt.allocPrint(allocator, "./{s}.html", .{entry.key_ptr.*});
+        var fd = try dir.createFile(file, .{});
+        defer fd.close();
+        var writer = bufWriter(fd.writer());
+
+        if (std.mem.indexOf(u8, html, "<!--")) |index| {
+            _ = try writer.write(html[0..index]);
+        }
+        const value = entry.value_ptr.items;
+        for (value) |item| {
+            const string = try std.fmt.allocPrint(allocator, "<h2>{s}</h2>", .{item.get("title") orelse ""});
+            _ = try writer.write(string);
+        }
+        try writer.flush();
+    }
+}
+// The metamatter parser
+fn parseMeta(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
+    var metadata = std.StringHashMap([]const u8).init(allocator);
+    var tagList = std.ArrayList([]const u8).init(allocator);
+    var index: usize = 0;
+    var lines = std.mem.splitSequence(u8, content, "\n");
+    while (lines.next()) |line| {
+        if (line.len > 0 and line[0] == '%') {
+            var parts = std.mem.splitSequence(u8, line[1..], ":");
+            const key = parts.next() orelse continue;
+            const val = parts.next() orelse continue;
+            const key_trim = std.mem.trim(u8, key, " ");
+            const val_trim = std.mem.trim(u8, val, " ");
+            if (std.mem.eql(u8, key_trim, "tags")) {
+                // do tags here
+                var tags = std.mem.splitSequence(u8, val[0..], ",");
+                while (tags.next()) |tag| {
+                    try tagList.append(tag);
+                }
+            } else {
+                try metadata.put(key_trim, val_trim);
+            }
+            index += line.len + 1;
+        } else {
+            return Metamatter{ .metadata = metadata, .tags = tagList, .index = index };
+        }
+    }
+    return Metamatter{ .metadata = undefined, .tags = undefined, .index = 0 };
+}
+
+pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, dir: fs.Dir, html: []const u8) !void {
+    const markdown = try fd.readToEndAlloc(allocator, 1024 * 1024);
+    defer allocator.free(markdown);
+    // pass the file to be parsed.
+    const metamatter = try parseMeta(allocator, markdown);
+    try collectTag(allocator, metamatter);
+    const newFile = try std.fmt.allocPrint(allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
+    defer allocator.free(newFile);
+    var htmlFile = try fs.cwd().createFile(newFile, .{});
+    defer htmlFile.close();
+    var bufferedwriter = bufWriter(htmlFile.writer());
+    // here we call ludicrous
+    try parser(markdown[metamatter.index + 1 ..], &bufferedwriter, metamatter, html, dir);
     try bufferedwriter.flush();
 }
 
-pub fn createTagPage(allocator: std.mem.Allocator, dir: fs.Dir, tagger: *Tagger) !void {
-    var iter = tagger.*.tagmap.iterator();
-    while (iter.next()) |value| {
-        const key = value.key_ptr.*;
-        std.debug.print("{s}", .{key});
-        const fd = try std.fmt.allocPrint(allocator, "{s}.html", .{value.key_ptr.*});
-        var tag_file = try dir.createFile(fd, .{});
-        defer tag_file.close();
-        const templ = try dir.openFile("../templates/tag.html", .{ .mode = .read_only });
-        var tag_bufwrite = io.bufferedWriter(tag_file.writer());
-        var temp = try templ.readToEndAlloc(allocator, 1024 * 1024);
-        defer allocator.free(temp);
-        if (std.mem.indexOf(u8, temp, "<!--")) |start| {
-            _ = try tag_bufwrite.write(temp[0..start]);
-            _ = try tag_bufwrite.write("Here lies the treasure");
-            _ = try tag_bufwrite.write(temp[start + 11 ..]);
+pub fn stroll(allocator: std.mem.Allocator, dir: fs.Dir, html: []const u8) !void {
+    var content_dir = dir.openDir("./content", .{ .iterate = true }) catch |err| {
+        std.log.err("Unable to open the content directory: {}", .{err});
+        return err;
+    };
+    const templ = try dir.openFile("./templates/tag.html", .{ .mode = .read_only });
+    defer templ.close();
+    var stroller = try content_dir.walk(allocator);
+    defer stroller.deinit();
+
+    while (try stroller.next()) |unit| {
+        if (unit.kind == .file) {
+            const path = try std.fmt.allocPrint(allocator, "./content/{s}", .{unit.path});
+            defer allocator.free(path);
+            const fd = dir.openFile(path, .{ .mode = .read_only }) catch |err| {
+                std.log.err("{s} can't be opened for reading. Please check file permissions.", .{unit.path});
+                return err;
+            };
+            defer fd.close();
+            try prepare(allocator, fd, unit.path, dir, html);
+            // parse markdown
         }
-        try tag_bufwrite.flush();
     }
 }
 
-pub fn ludicrous(allocator: std.mem.Allocator, markdown: []const u8, scribe: anytype, writer: anytype, metamatter: Metamatter, html: []const u8, src_dir: fs.Dir, tagger: *Tagger) !void {
-    _ = allocator;
-
-    _ = tagger;
+fn parser(markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: []const u8, src_dir: fs.Dir) !void {
     const x = struct {
         fn callback(conv: [*c]const md.MD_CHAR, size: md.MD_SIZE, userdata: ?*anyopaque) callconv(.C) void {
-            const file: *@TypeOf(writer) = @ptrCast(@alignCast(userdata.?));
+            const file: *@TypeOf(scribe.*.writer()) = @ptrCast(@alignCast(userdata.?));
             if (file.write(conv[0..size])) |_| {} else |err| {
                 std.log.err("File write failed {}", .{err});
             }
@@ -151,7 +159,7 @@ pub fn ludicrous(allocator: std.mem.Allocator, markdown: []const u8, scribe: any
                 _ = try scribe.write(metamatter.metadata.get(pointer[start_index + 4 .. end_index]) orelse "");
                 pointer = pointer[end_index + 3 ..];
             } else {
-                _ = md.md_html(markdown.ptr, @intCast(markdown.len), x.callback, @ptrCast(@constCast(&writer)), @intCast(0), md.MD_HTML_FLAG_DEBUG);
+                _ = md.md_html(markdown.ptr, @intCast(markdown.len), x.callback, @ptrCast(@constCast(&(scribe.*.writer()))), @intCast(0), md.MD_HTML_FLAG_DEBUG);
                 pointer = pointer[end_index + 3 ..];
             }
         } else {
@@ -162,27 +170,26 @@ pub fn ludicrous(allocator: std.mem.Allocator, markdown: []const u8, scribe: any
 }
 
 pub fn main() !void {
-    const alloc = std.heap.raw_c_allocator;
-    const template = "./templates/template.html";
-    const fd = fs.cwd().openFile(template, .{ .mode = .read_only }) catch |e| {
-        std.log.err("{s} Can't be opened for reading", .{template});
-        return e;
+    // Literally calls the libc malloc/free
+    const allocator = std.heap.raw_c_allocator;
+    var src_dir = try fs.cwd().openDir(".", .{ .iterate = true });
+    defer src_dir.close();
+    const template = src_dir.openFile("./templates/template.html", .{ .mode = .read_only }) catch |err| {
+        std.log.err("{s}: Template cannot be accessed. Please check file permissions.", .{TEMPLATE});
+        return err;
     };
-    defer fd.close();
-    const html = try fd.readToEndAlloc(alloc, 1024 * 1024);
-    var dir = fs.cwd().openDir("tags/", .{}) catch |err| {
-        if (err == fs.OpenSelfExeError.FileNotFound) {
-            std.debug.print("creating tags dir", .{});
-            return try fs.cwd().makeDir("tags");
-        } else {
-            return error.Unexpected;
-        }
+    defer template.close();
+
+    std.fs.cwd().makeDir("tags") catch |e| switch (e) {
+        error.PathAlreadyExists => {}, // assume it exists, try to create files or stat to figure out if it's a dir
+        else => return e,
     };
-    defer dir.close();
-    var tag_hashmap = std.StringHashMap(std.ArrayList([]const u8)).init(alloc);
-    defer tag_hashmap.deinit();
-    var tagger = Tagger{ .tagmap = tag_hashmap };
-    try stroll(alloc, "markdwns/", html, &tagger);
-    std.debug.print("{}", .{tagger.tagmap.count()});
-    try createTagPage(alloc, dir, &tagger);
+    var tag_dir = try src_dir.openDir("tags", .{});
+    defer tag_dir.close();
+    const html = try template.readToEndAlloc(allocator, 1024 * 1024);
+    allocator.free(html);
+    tagmap = @TypeOf(tagmap).init(allocator);
+    defer tagmap.deinit();
+    try stroll(allocator, src_dir, html);
+    try createTagFiles(allocator, tag_dir);
 }

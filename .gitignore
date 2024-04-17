@@ -1,5 +1,7 @@
 /zig-out
+/tags
 /markdwns
+/content
 /markdwns.bak
 /temp
 /MarkdownTest_1.0.zip
@@ -7,5 +9,6 @@
 /MarkdownTest_1.0
 /md4c
 /zig-cache
+*bak*
 *.html
 *.o
