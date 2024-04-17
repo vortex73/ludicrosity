@@ -14,25 +14,25 @@ const Metamatter = struct {
     tags: std.ArrayList([]const u8),
 };
 
-pub var tagmap: std.StringHashMap(std.ArrayList(std.StringHashMap([]const u8))) = undefined;
+const TagMap = std.StringHashMap(std.ArrayList(std.StringHashMap([]const u8)));
 
 pub fn bufWriter(underlying_stream: anytype) io.BufferedWriter(1024 * 128, @TypeOf(underlying_stream)) {
     return .{ .unbuffered_writer = underlying_stream };
 }
 
-pub fn collectTag(allocator: std.mem.Allocator, metamatter: Metamatter) !void {
+pub fn collectTag(allocator: std.mem.Allocator, metamatter: Metamatter, tagmap: *TagMap) !void {
     for (metamatter.tags.items) |tag| {
-        if (tagmap.getPtr(tag)) |entry| {
+        if (tagmap.*.getPtr(tag)) |entry| {
             try entry.append(metamatter.metadata);
         } else {
             var newposts = std.ArrayList(std.StringHashMap([]const u8)).init(allocator);
             try newposts.append(metamatter.metadata);
-            try tagmap.put(tag, newposts);
+            try tagmap.*.put(tag, newposts);
         }
     }
 }
-fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir) !void {
-    var hash_iter = tagmap.iterator();
+fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir, tagmap: *TagMap) !void {
+    var hash_iter = tagmap.*.iterator();
     const template = dir.openFile("../templates/tag.html", .{ .mode = .read_only }) catch |err| {
         std.log.err("Unable to open template for reading. Please check permissions. {}", .{err});
         return err;
@@ -98,13 +98,13 @@ fn parseMeta(allocator: std.mem.Allocator, content: []const u8, arenacater: std.
     return Metamatter{ .metadata = undefined, .tags = undefined, .index = 0 };
 }
 
-pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, dir: fs.Dir, html: []const u8, markdown: *std.ArrayList(u8), arenacater: std.mem.Allocator) !void {
+pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, dir: fs.Dir, html: []const u8, markdown: *std.ArrayList(u8), arenacater: std.mem.Allocator, tagmap: *TagMap) !void {
     const reader = fd.reader();
     try reader.readAllArrayList(markdown, 0xffff_ffff);
     defer markdown.clearRetainingCapacity();
     // pass the file to be parsed.
     const metamatter = try parseMeta(allocator, markdown.items, arenacater);
-    try collectTag(allocator, metamatter);
+    try collectTag(allocator, metamatter, tagmap);
     const newFile = try std.fmt.allocPrint(allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
     defer allocator.free(newFile);
     var htmlFile = try fs.cwd().createFile(newFile, .{});
@@ -115,7 +115,7 @@ pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, 
     try bufferedwriter.flush();
 }
 
-pub fn stroll(allocator: std.mem.Allocator, dir: fs.Dir, arenacater: std.mem.Allocator, html: []const u8) !void {
+pub fn stroll(allocator: std.mem.Allocator, dir: fs.Dir, arenacater: std.mem.Allocator, html: []const u8, tagmap: *TagMap) !void {
     var markdown = std.ArrayList(u8).init(allocator);
     defer markdown.deinit();
     var content_dir = dir.openDir("./content", .{ .iterate = true }) catch |err| {
@@ -136,7 +136,7 @@ pub fn stroll(allocator: std.mem.Allocator, dir: fs.Dir, arenacater: std.mem.All
                 return err;
             };
             defer fd.close();
-            try prepare(allocator, fd, unit.path, dir, html, &markdown, arenacater);
+            try prepare(allocator, fd, unit.path, dir, html, &markdown, arenacater, tagmap);
             // parse markdown
         }
     }
@@ -183,6 +183,7 @@ pub fn main() !void {
     // Literally calls the libc malloc/free
     //const allocator = std.heap.raw_c_allocator;
 
+    var tagmap: std.StringHashMap(std.ArrayList(std.StringHashMap([]const u8))) = undefined;
     var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
     const allocator = gpa.allocator();
     defer std.debug.assert(gpa.deinit() == .ok);
@@ -205,8 +206,8 @@ pub fn main() !void {
     defer tag_dir.close();
     const html = try template.readToEndAlloc(allocator, 1024 * 1024);
     defer allocator.free(html);
-    tagmap = @TypeOf(tagmap).init(allocator);
+    tagmap = TagMap.init(allocator);
     defer tagmap.deinit();
-    try stroll(allocator, src_dir, arenacater, html);
-    try createTagFiles(allocator, tag_dir);
+    try stroll(allocator, src_dir, arenacater, html, &tagmap);
+    try createTagFiles(allocator, tag_dir, &tagmap);
 }
