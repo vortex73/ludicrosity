@@ -99,11 +99,13 @@ fn parseMeta(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
     return Metamatter{ .metadata = undefined, .tags = undefined, .index = 0 };
 }
 
-pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, dir: fs.Dir, html: []const u8) !void {
-    const markdown = try fd.readToEndAlloc(allocator, 1024 * 1024);
-    _ = try allocator.dupe(u8, markdown);
+pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, dir: fs.Dir, html: []const u8, markdown: *std.ArrayList(u8)) !void {
+    const reader = fd.reader();
+    try reader.readAllArrayList(markdown, 0xffff_ffff);
+    defer markdown.clearRetainingCapacity();
+    _ = try allocator.dupe(u8, markdown.items);
     // pass the file to be parsed.
-    const metamatter = try parseMeta(allocator, markdown);
+    const metamatter = try parseMeta(allocator, markdown.items);
     try collectTag(allocator, metamatter);
     const newFile = try std.fmt.allocPrint(allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
     defer allocator.free(newFile);
@@ -111,11 +113,12 @@ pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, 
     defer htmlFile.close();
     var bufferedwriter = bufWriter(htmlFile.writer());
     // here we call ludicrous
-    try parser(markdown[metamatter.index + 1 ..], &bufferedwriter, metamatter, html, dir);
+    try parser(markdown.items[metamatter.index + 1 ..], &bufferedwriter, metamatter, html, dir);
     try bufferedwriter.flush();
 }
 
 pub fn stroll(allocator: std.mem.Allocator, dir: fs.Dir, html: []const u8) !void {
+    var markdown = std.ArrayList(u8).init(allocator);
     var content_dir = dir.openDir("./content", .{ .iterate = true }) catch |err| {
         std.log.err("Unable to open the content directory: {}", .{err});
         return err;
@@ -134,7 +137,7 @@ pub fn stroll(allocator: std.mem.Allocator, dir: fs.Dir, html: []const u8) !void
                 return err;
             };
             defer fd.close();
-            try prepare(allocator, fd, unit.path, dir, html);
+            try prepare(allocator, fd, unit.path, dir, html, &markdown);
             // parse markdown
         }
     }
@@ -160,7 +163,7 @@ fn parser(markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: [
                     _ = src_dir;
                     while (true) {
                         const tag = list.popOrNull() orelse break;
-                        const bufw = try std.fmt.bufPrint(&buff, "<li><a href=\"tags/{s}\">[{s}]</a></li> ", .{ std.mem.trim(u8, tag, " "), std.mem.trim(u8, tag, " ") });
+                        const bufw = try std.fmt.bufPrint(&buff, "<li><a href=\"tags/{s}.html\">[{s}]</a></li> ", .{ std.mem.trim(u8, tag, " "), std.mem.trim(u8, tag, " ") });
                         _ = try scribe.write(bufw);
                     }
                 } else {}
