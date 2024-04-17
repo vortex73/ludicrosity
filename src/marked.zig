@@ -63,7 +63,7 @@ fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir) !void {
     }
 }
 // The metamatter parser
-fn parseMeta(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
+fn parseMeta(allocator: std.mem.Allocator, content: []const u8, arenacater: std.mem.Allocator) !Metamatter {
     var metadata = std.StringHashMap([]const u8).init(allocator);
     var tagList = std.ArrayList([]const u8).init(allocator);
     errdefer tagList.deinit();
@@ -76,14 +76,14 @@ fn parseMeta(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
             const val = parts.next() orelse continue;
             const key_trim = std.mem.trim(u8, key, " ");
             const val_trim = std.mem.trim(u8, val, " ");
-            _ = try allocator.dupe(u8, key_trim);
-            _ = try allocator.dupe(u8, val_trim);
+            _ = try arenacater.dupe(u8, key_trim);
+            _ = try arenacater.dupe(u8, val_trim);
             if (std.mem.eql(u8, key_trim, "tags")) {
                 // do tags here
                 var tags = std.mem.splitSequence(u8, val[0..], ",");
                 var int: usize = 0;
                 while (tags.next()) |tag| {
-                    _ = try allocator.dupe(u8, tag);
+                    _ = try arenacater.dupe(u8, tag);
                     try tagList.insert(int, tag);
                     int += 1;
                 }
@@ -98,12 +98,12 @@ fn parseMeta(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
     return Metamatter{ .metadata = undefined, .tags = undefined, .index = 0 };
 }
 
-pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, dir: fs.Dir, html: []const u8, markdown: *std.ArrayList(u8)) !void {
+pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, dir: fs.Dir, html: []const u8, markdown: *std.ArrayList(u8), arenacater: std.mem.Allocator) !void {
     const reader = fd.reader();
     try reader.readAllArrayList(markdown, 0xffff_ffff);
     defer markdown.clearRetainingCapacity();
     // pass the file to be parsed.
-    const metamatter = try parseMeta(allocator, markdown.items);
+    const metamatter = try parseMeta(allocator, markdown.items, arenacater);
     try collectTag(allocator, metamatter);
     const newFile = try std.fmt.allocPrint(allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
     defer allocator.free(newFile);
@@ -115,9 +115,9 @@ pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, 
     try bufferedwriter.flush();
 }
 
-pub fn stroll(allocator: std.mem.Allocator, dir: fs.Dir, html: []const u8) !void {
+pub fn stroll(allocator: std.mem.Allocator, dir: fs.Dir, arenacater: std.mem.Allocator, html: []const u8) !void {
     var markdown = std.ArrayList(u8).init(allocator);
-    markdown.deinit();
+    defer markdown.deinit();
     var content_dir = dir.openDir("./content", .{ .iterate = true }) catch |err| {
         std.log.err("Unable to open the content directory: {}", .{err});
         return err;
@@ -136,7 +136,7 @@ pub fn stroll(allocator: std.mem.Allocator, dir: fs.Dir, html: []const u8) !void
                 return err;
             };
             defer fd.close();
-            try prepare(allocator, fd, unit.path, dir, html, &markdown);
+            try prepare(allocator, fd, unit.path, dir, html, &markdown, arenacater);
             // parse markdown
         }
     }
@@ -183,11 +183,12 @@ pub fn main() !void {
     // Literally calls the libc malloc/free
     //const allocator = std.heap.raw_c_allocator;
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
     const allocator = gpa.allocator();
-    //    var arena = std.heap.ArenaAllocator.init(std.heap.raw_c_allocator);
-    //    defer arena.deinit();
-    //    const allocator = arena.allocator();
+    defer std.debug.assert(gpa.deinit() == .ok);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const arenacater = arena.allocator();
     var src_dir = try fs.cwd().openDir(".", .{ .iterate = true });
     defer src_dir.close();
     const template = src_dir.openFile("./templates/template.html", .{ .mode = .read_only }) catch |err| {
@@ -206,6 +207,6 @@ pub fn main() !void {
     defer allocator.free(html);
     tagmap = @TypeOf(tagmap).init(allocator);
     defer tagmap.deinit();
-    try stroll(allocator, src_dir, html);
+    try stroll(allocator, src_dir, arenacater, html);
     try createTagFiles(allocator, tag_dir);
 }
