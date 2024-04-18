@@ -187,5 +187,13 @@ pub fn main() !void {
 
     tagmap = TagMap.init(allocator);
     defer tagmap.deinit();
+    var hashIter = tagmap.iterator();
+    while (hashIter.next()) |*tag| {
+        defer tag.value_ptr.deinit();
+        const value = tag.value_ptr.items;
+        for (value) |*item| {
+            item.deinit();
+        }
+    }
     try stroll(allocator, aAlloc, content_dir, layouts, &tagmap);
 }
