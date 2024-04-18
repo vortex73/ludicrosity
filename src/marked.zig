@@ -72,20 +72,68 @@ fn parseMetamatter(allocator: std.mem.Allocator, arena: std.mem.Allocator, conte
 
 fn createHtml(path: []const u8) !fs.File {
     var buffer: [fs.MAX_PATH_BYTES]u8 = undefined;
-    const filePath = try std.fmt.bufPrint(&buffer, "{s}html", .{path[0 .. path.len - 2]});
-    const htmlFile = try fs.cwd().openFile(filePath, .{});
+    const filePath = try std.fmt.bufPrint(&buffer, "./rendered/{s}html", .{path[0 .. path.len - 2]});
+    const htmlFile = try fs.cwd().createFile(filePath, .{});
     return htmlFile;
 }
 
-fn stroll(allocator: std.mem.Allocator, arena: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts) !void {
-    _ = layouts;
+pub fn collectTag(allocator: std.mem.Allocator, metamatter: Metamatter, tagmap: *TagMap) !void {
+    for (metamatter.tags.items) |tag| {
+        if (tagmap.getPtr(tag)) |entry| {
+            try entry.append(metamatter.metadata);
+        } else {
+            var newposts = std.ArrayList(std.StringHashMap([]const u8)).init(allocator);
+            try newposts.append(metamatter.metadata);
+            try tagmap.put(tag, newposts);
+        }
+    }
+    metamatter.tags.deinit();
+}
+
+fn parser(markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: []const u8) !void {
+    const x = struct {
+        fn callback(conv: [*c]const md.MD_CHAR, size: md.MD_SIZE, userdata: ?*anyopaque) callconv(.C) void {
+            const file: *@TypeOf(scribe.*.writer()) = @ptrCast(@alignCast(userdata.?));
+            if (file.write(conv[0..size])) |_| {} else |err| {
+                std.log.err("File write failed {}", .{err});
+            }
+        }
+    };
+    var pointer: []const u8 = html;
+    while (std.mem.indexOf(u8, pointer, "<!--")) |start_index| {
+        _ = try scribe.write(pointer[0..start_index]);
+        if (std.mem.indexOf(u8, pointer, "-->")) |end_index| {
+            if (!std.mem.eql(u8, pointer[start_index + 4 .. end_index], "BODY")) {
+                if (std.mem.eql(u8, pointer[start_index + 4 .. end_index], "tags")) {
+                    var list = metamatter.tags;
+                    var buff: [256]u8 = undefined;
+                    while (true) {
+                        const tag = list.popOrNull() orelse break;
+                        const bufw = try std.fmt.bufPrint(&buff, "<li><a href=\"tags/{s}.html\">[{s}]</a></li> ", .{ std.mem.trim(u8, tag, " "), std.mem.trim(u8, tag, " ") });
+                        _ = try scribe.write(bufw);
+                    }
+                } else {}
+                _ = try scribe.write(metamatter.metadata.get(pointer[start_index + 4 .. end_index]) orelse "");
+                pointer = pointer[end_index + 3 ..];
+            } else {
+                _ = md.md_html(markdown.ptr, @intCast(markdown.len), x.callback, @ptrCast(@constCast(&(scribe.*.writer()))), @intCast(0), md.MD_HTML_FLAG_DEBUG);
+                pointer = pointer[end_index + 3 ..];
+            }
+        } else {
+            std.debug.print("Unclosed CommentLine encountered in template file", .{});
+        }
+    }
+    _ = try scribe.write(pointer[0..]);
+}
+
+fn stroll(allocator: std.mem.Allocator, arena: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, tagmap: *TagMap) !void {
     var markdown = std.ArrayList(u8).init(allocator);
     defer markdown.deinit();
 
     var metamatter: Metamatter = undefined;
 
     var stroller = try content_dir.walk(allocator);
-    stroller.deinit();
+    defer stroller.deinit();
 
     var buffer: [fs.MAX_PATH_BYTES]u8 = undefined;
     while (try stroller.next()) |post| {
@@ -104,6 +152,8 @@ fn stroll(allocator: std.mem.Allocator, arena: std.mem.Allocator, content_dir: f
             var writer = bufWriter(htmlFile.writer());
             defer writer.flush() catch std.log.err("Flush failed. Bring a plunger ;D", .{});
             // parse markdown now
+            try parser(markdown.items[metamatter.index + 1 ..], &writer, metamatter, layouts.post);
+            try collectTag(allocator, metamatter, tagmap);
         }
     }
 }
@@ -137,5 +187,5 @@ pub fn main() !void {
 
     tagmap = TagMap.init(allocator);
     defer tagmap.deinit();
-    try stroll(allocator, aAlloc, content_dir, layouts);
+    try stroll(allocator, aAlloc, content_dir, layouts, &tagmap);
 }
