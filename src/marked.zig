@@ -12,6 +12,10 @@ const Metamatter = struct {
     metadata: std.StringHashMap([]const u8),
     index: usize,
     tags: std.ArrayList([]const u8),
+    fn deinit(self: *Metamatter) void {
+        self.metadata.deinit();
+        self.tags.deinit();
+    }
 };
 
 const TagMap = std.StringHashMap(std.ArrayList(std.StringHashMap([]const u8)));
@@ -22,17 +26,17 @@ pub fn bufWriter(underlying_stream: anytype) io.BufferedWriter(1024 * 128, @Type
 
 pub fn collectTag(allocator: std.mem.Allocator, metamatter: Metamatter, tagmap: *TagMap) !void {
     for (metamatter.tags.items) |tag| {
-        if (tagmap.*.getPtr(tag)) |entry| {
+        if (tagmap.getPtr(tag)) |entry| {
             try entry.append(metamatter.metadata);
         } else {
             var newposts = std.ArrayList(std.StringHashMap([]const u8)).init(allocator);
             try newposts.append(metamatter.metadata);
-            try tagmap.*.put(tag, newposts);
+            try tagmap.put(tag, newposts);
         }
     }
 }
 fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir, tagmap: *TagMap) !void {
-    var hash_iter = tagmap.*.iterator();
+    var hash_iter = tagmap.iterator();
     const template = dir.openFile("../templates/tag.html", .{ .mode = .read_only }) catch |err| {
         std.log.err("Unable to open template for reading. Please check permissions. {}", .{err});
         return err;
@@ -53,8 +57,8 @@ fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir, tagmap: *TagMap) !v
         }
         const value = entry.value_ptr.items;
         for (value) |item| {
-            const string = try std.fmt.allocPrint(allocator, "<h2>{s}</h2>", .{item.get("title") orelse ""});
-            _ = try writer.write(string);
+            //            const string = try std.fmt.allocPrint(allocator, "<h2>{s}</h2>", .{item.get("title") orelse ""});
+            try writer.writer().print("<h2>{s}</h2>", .{item.get("title") orelse ""});
         }
         if (std.mem.indexOf(u8, html, "<!--")) |index| {
             _ = try writer.write(html[index + 11 ..]);
@@ -76,19 +80,19 @@ fn parseMeta(allocator: std.mem.Allocator, content: []const u8, arenacater: std.
             const val = parts.next() orelse continue;
             const key_trim = std.mem.trim(u8, key, " ");
             const val_trim = std.mem.trim(u8, val, " ");
-            _ = try arenacater.dupe(u8, key_trim);
-            _ = try arenacater.dupe(u8, val_trim);
-            if (std.mem.eql(u8, key_trim, "tags")) {
+            const key_copy = try arenacater.dupe(u8, key_trim);
+            const val_copy = try arenacater.dupe(u8, val_trim);
+            if (std.mem.eql(u8, key_copy, "tags")) {
                 // do tags here
                 var tags = std.mem.splitSequence(u8, val[0..], ",");
                 var int: usize = 0;
                 while (tags.next()) |tag| {
-                    _ = try arenacater.dupe(u8, tag);
-                    try tagList.insert(int, tag);
+                    const tag_copy = try arenacater.dupe(u8, tag);
+                    try tagList.insert(int, tag_copy);
                     int += 1;
                 }
             } else {
-                try metadata.put(key_trim, val_trim);
+                try metadata.put(key_copy, val_copy);
             }
             index += line.len + 1;
         } else {
@@ -103,7 +107,8 @@ pub fn prepare(allocator: std.mem.Allocator, fd: fs.File, src_path: []const u8, 
     try reader.readAllArrayList(markdown, 0xffff_ffff);
     defer markdown.clearRetainingCapacity();
     // pass the file to be parsed.
-    const metamatter = try parseMeta(allocator, markdown.items, arenacater);
+    var metamatter = try parseMeta(allocator, markdown.items, arenacater);
+    defer metamatter.deinit();
     try collectTag(allocator, metamatter, tagmap);
     const newFile = try std.fmt.allocPrint(allocator, "{s}html", .{src_path[0 .. src_path.len - 2]});
     defer allocator.free(newFile);
