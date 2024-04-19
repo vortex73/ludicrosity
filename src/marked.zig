@@ -70,6 +70,31 @@ fn parseMetamatter(allocator: std.mem.Allocator, arena: std.mem.Allocator, conte
     return Metamatter{ .metadata = undefined, .tags = undefined, .index = 0 };
 }
 
+fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir, html: []const u8, tagmap: *TagMap) !void {
+    var hash_iter = tagmap.iterator();
+    defer allocator.free(html);
+    while (hash_iter.next()) |entry| {
+        const path = entry.key_ptr.*;
+        var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        const file = try std.fmt.bufPrint(&buffer, "../tags/{s}.html", .{path});
+        var fd = try dir.createFile(file, .{});
+        defer fd.close();
+        var writer = bufWriter(fd.writer());
+
+        if (std.mem.indexOf(u8, html, "<!--")) |index| {
+            _ = try writer.write(html[0..index]);
+        }
+        const value = entry.value_ptr.items;
+        for (value) |item| {
+            try writer.writer().print("<h2>{s}</h2>", .{item.get("title") orelse ""});
+        }
+        if (std.mem.indexOf(u8, html, "<!--")) |index| {
+            _ = try writer.write(html[index + 11 ..]);
+        }
+        try writer.flush();
+    }
+}
+
 fn createHtml(path: []const u8) !fs.File {
     var buffer: [fs.MAX_PATH_BYTES]u8 = undefined;
     const filePath = try std.fmt.bufPrint(&buffer, "./rendered/{s}html", .{path[0 .. path.len - 2]});
@@ -106,7 +131,7 @@ fn parser(markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: [
             if (!std.mem.eql(u8, pointer[start_index + 4 .. end_index], "BODY")) {
                 if (std.mem.eql(u8, pointer[start_index + 4 .. end_index], "tags")) {
                     var list = metamatter.tags;
-                    var buff: [256]u8 = undefined;
+                    var buff: [4 * 1024]u8 = undefined;
                     while (true) {
                         const tag = list.popOrNull() orelse break;
                         const bufw = try std.fmt.bufPrint(&buff, "<li><a href=\"tags/{s}.html\">[{s}]</a></li> ", .{ std.mem.trim(u8, tag, " "), std.mem.trim(u8, tag, " ") });
@@ -196,4 +221,5 @@ pub fn main() !void {
         }
     }
     try stroll(allocator, aAlloc, content_dir, layouts, &tagmap);
+    try createTagFiles(allocator, content_dir, layouts.tags, &tagmap);
 }
