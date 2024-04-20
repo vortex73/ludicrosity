@@ -67,12 +67,11 @@ fn parseMetamatter(allocator: std.mem.Allocator, content: []const u8) !Metamatte
             return Metamatter{ .metadata = metadata, .tags = tagList, .index = index };
         }
     }
-    return Metamatter{ .metadata = undefined, .tags = undefined, .index = 0 };
+    return Metamatter{ .metadata = metadata, .tags = tagList, .index = 0 };
 }
 
-fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir, html: []const u8, tagmap: *TagMap) !void {
+fn createTagFiles(dir: fs.Dir, html: []const u8, tagmap: *TagMap) !void {
     var hash_iter = tagmap.iterator();
-    defer allocator.free(html);
     while (hash_iter.next()) |entry| {
         const path = entry.key_ptr.*;
         var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
@@ -184,12 +183,12 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, t
 }
 
 pub fn main() !void {
-    //var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
-    //const allocator = gpa.allocator();
-    //defer std.debug.assert(gpa.deinit() == .ok);
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
+    const allocator = gpa.allocator();
+    defer std.debug.assert(gpa.deinit() == .ok);
     var arena = std.heap.ArenaAllocator.init(std.heap.raw_c_allocator);
     defer arena.deinit();
-    const allocator = arena.allocator();
+    const aAlloc = arena.allocator();
 
     // define a tagmap
     var tagmap: TagMap = undefined;
@@ -199,8 +198,10 @@ pub fn main() !void {
     defer content_dir.close();
 
     const layouts = try readLayouts(allocator, content_dir);
+    defer allocator.free(layouts.post);
+    defer allocator.free(layouts.tags);
 
-    // verify tags directory
+    // verify custom directories
     fs.cwd().makeDir("tags") catch |e| switch (e) {
         error.PathAlreadyExists => {},
         else => return e,
@@ -212,14 +213,16 @@ pub fn main() !void {
 
     tagmap = TagMap.init(allocator);
     defer tagmap.deinit();
-    var hashIter = tagmap.iterator();
-    while (hashIter.next()) |*tag| {
-        defer tag.value_ptr.deinit();
-        const value = tag.value_ptr.items;
-        for (value) |*item| {
-            item.deinit();
+    defer {
+        var hashIter = tagmap.iterator();
+        while (hashIter.next()) |*tag| {
+            defer tag.value_ptr.deinit();
+            const value = tag.value_ptr.items;
+            for (value) |*item| {
+                item.deinit();
+            }
         }
     }
-    try stroll(allocator, content_dir, layouts, &tagmap);
-    try createTagFiles(allocator, content_dir, layouts.tags, &tagmap);
+    try stroll(allocator, aAlloc, content_dir, layouts, &tagmap);
+    try createTagFiles(content_dir, layouts.tags, &tagmap);
 }
