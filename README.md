@@ -12,7 +12,7 @@ A Static Site Generator in Zig
 
 ```bash
 git clone git@github.com:vortex73/ludicrosity.git --recurse-submodules
-zig build -Doptimize=ReleaseSafe
+zig build -Doptimize=ReleaseFast
 ```
 
 # Project Structure

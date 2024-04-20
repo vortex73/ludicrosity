@@ -192,12 +192,12 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, t
 
 pub fn main() !void {
     // gpa used to detect memory leaks. Most likely temporary.
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
-    const allocator = gpa.allocator();
-    defer std.debug.assert(gpa.deinit() == .ok);
+    // var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
+    // const allocator = gpa.allocator();
+    // defer std.debug.assert(gpa.deinit() == .ok);
     var arena = std.heap.ArenaAllocator.init(std.heap.raw_c_allocator);
     defer arena.deinit();
-    const aAlloc = arena.allocator();
+    const allocator = arena.allocator();
 
     // define a tagmap
     var tagmap: TagMap = undefined;
@@ -234,6 +234,6 @@ pub fn main() !void {
             }
         }
     }
-    try stroll(allocator, aAlloc, content_dir, layouts, &tagmap);
+    try stroll(allocator, content_dir, layouts, &tagmap);
     try createTagFiles(content_dir, layouts.tags, &tagmap);
 }
