@@ -199,6 +199,7 @@ pub fn main() !void {
     defer content_dir.close();
 
     const layouts = try readLayouts(allocator, content_dir);
+    defer allocator.free(layouts.post);
 
     // verify tags directory
     fs.cwd().makeDir("tags") catch |e| switch (e) {
@@ -213,13 +214,15 @@ pub fn main() !void {
     tagmap = TagMap.init(allocator);
     defer tagmap.deinit();
     var hashIter = tagmap.iterator();
-    while (hashIter.next()) |*tag| {
-        defer tag.value_ptr.deinit();
-        const value = tag.value_ptr.items;
-        for (value) |*item| {
-            item.deinit();
+    try stroll(allocator, aAlloc, content_dir, layouts, &tagmap);
+    defer {
+        while (hashIter.next()) |*tag| {
+            defer tag.value_ptr.deinit();
+            const value = tag.value_ptr.items;
+            for (value) |*item| {
+                item.deinit();
+            }
         }
     }
-    try stroll(allocator, aAlloc, content_dir, layouts, &tagmap);
     try createTagFiles(allocator, content_dir, layouts.tags, &tagmap);
 }
