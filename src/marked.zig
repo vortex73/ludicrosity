@@ -67,12 +67,11 @@ fn parseMetamatter(allocator: std.mem.Allocator, arena: std.mem.Allocator, conte
             return Metamatter{ .metadata = metadata, .tags = tagList, .index = index };
         }
     }
-    return Metamatter{ .metadata = undefined, .tags = undefined, .index = 0 };
+    return Metamatter{ .metadata = metadata, .tags = tagList, .index = 0 };
 }
 
-fn createTagFiles(allocator: std.mem.Allocator, dir: fs.Dir, html: []const u8, tagmap: *TagMap) !void {
+fn createTagFiles(dir: fs.Dir, html: []const u8, tagmap: *TagMap) !void {
     var hash_iter = tagmap.iterator();
-    defer allocator.free(html);
     while (hash_iter.next()) |entry| {
         const path = entry.key_ptr.*;
         var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
@@ -200,8 +199,9 @@ pub fn main() !void {
 
     const layouts = try readLayouts(allocator, content_dir);
     defer allocator.free(layouts.post);
+    defer allocator.free(layouts.tags);
 
-    // verify tags directory
+    // verify custom directories
     fs.cwd().makeDir("tags") catch |e| switch (e) {
         error.PathAlreadyExists => {},
         else => return e,
@@ -213,9 +213,8 @@ pub fn main() !void {
 
     tagmap = TagMap.init(allocator);
     defer tagmap.deinit();
-    var hashIter = tagmap.iterator();
-    try stroll(allocator, aAlloc, content_dir, layouts, &tagmap);
     defer {
+        var hashIter = tagmap.iterator();
         while (hashIter.next()) |*tag| {
             defer tag.value_ptr.deinit();
             const value = tag.value_ptr.items;
@@ -224,5 +223,6 @@ pub fn main() !void {
             }
         }
     }
-    try createTagFiles(allocator, content_dir, layouts.tags, &tagmap);
+    try stroll(allocator, aAlloc, content_dir, layouts, &tagmap);
+    try createTagFiles(content_dir, layouts.tags, &tagmap);
 }
