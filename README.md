@@ -11,6 +11,7 @@ A Static Site Generator in Zig
 > To ensure seamless builds please download the dev release of the zig compiler
 
 ```bash
+git clone git@github.com:vortex73/ludicrosity.git --recurse-submodules
 zig build -Doptimize=ReleaseSafe
 ```
 
