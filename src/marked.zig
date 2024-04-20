@@ -21,10 +21,12 @@ const Layouts = struct {
 
 const TagMap = std.StringHashMap(std.ArrayList(std.StringHashMap([]const u8)));
 
+// custom buffered writer big enough for anything.
 pub fn bufWriter(underlying_stream: anytype) io.BufferedWriter(1024 * 128, @TypeOf(underlying_stream)) {
     return .{ .unbuffered_writer = underlying_stream };
 }
 
+// loads templates
 fn readLayouts(allocator: std.mem.Allocator, content_dir: fs.Dir) !Layouts {
     const postFile = try content_dir.openFile("../templates/post.html", .{ .mode = .read_only });
     defer postFile.close();
@@ -35,6 +37,7 @@ fn readLayouts(allocator: std.mem.Allocator, content_dir: fs.Dir) !Layouts {
     return Layouts{ .post = post, .tags = tags };
 }
 
+// Parse Metamatter content
 fn parseMetamatter(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
     var metadata = std.StringHashMap([]const u8).init(allocator);
     var tagList = std.ArrayList([]const u8).init(allocator);
@@ -70,6 +73,7 @@ fn parseMetamatter(allocator: std.mem.Allocator, content: []const u8) !Metamatte
     return Metamatter{ .metadata = metadata, .tags = tagList, .index = 0 };
 }
 
+// Create one html file per tag
 fn createTagFiles(dir: fs.Dir, html: []const u8, tagmap: *TagMap) !void {
     var hash_iter = tagmap.iterator();
     while (hash_iter.next()) |entry| {
@@ -94,6 +98,7 @@ fn createTagFiles(dir: fs.Dir, html: []const u8, tagmap: *TagMap) !void {
     }
 }
 
+// creates a new html file in the rendered dir and returns the path
 fn createHtml(path: []const u8) !fs.File {
     var buffer: [fs.MAX_PATH_BYTES]u8 = undefined;
     const filePath = try std.fmt.bufPrint(&buffer, "./rendered/{s}html", .{path[0 .. path.len - 2]});
@@ -101,6 +106,7 @@ fn createHtml(path: []const u8) !fs.File {
     return htmlFile;
 }
 
+// collect tags and posts related to them
 pub fn collectTag(allocator: std.mem.Allocator, metamatter: Metamatter, tagmap: *TagMap) !void {
     for (metamatter.tags.items) |tag| {
         if (tagmap.getPtr(tag)) |entry| {
@@ -114,6 +120,7 @@ pub fn collectTag(allocator: std.mem.Allocator, metamatter: Metamatter, tagmap: 
     metamatter.tags.deinit();
 }
 
+// Parse markdown content and write into html file
 fn parser(markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: []const u8) !void {
     const x = struct {
         fn callback(conv: [*c]const md.MD_CHAR, size: md.MD_SIZE, userdata: ?*anyopaque) callconv(.C) void {
@@ -150,6 +157,7 @@ fn parser(markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: [
     _ = try scribe.write(pointer[0..]);
 }
 
+// Directory walker
 fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, tagmap: *TagMap) !void {
     var markdown = std.ArrayList(u8).init(allocator);
     defer markdown.deinit();
@@ -183,6 +191,7 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, t
 }
 
 pub fn main() !void {
+    // gpa used to detect memory leaks. Most likely temporary.
     var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
     const allocator = gpa.allocator();
     defer std.debug.assert(gpa.deinit() == .ok);
@@ -197,6 +206,7 @@ pub fn main() !void {
     var content_dir = try fs.cwd().openDir("./content", .{ .iterate = true });
     defer content_dir.close();
 
+    // load all layouts. Hardcoded for now, prolly make it more general purpose.
     const layouts = try readLayouts(allocator, content_dir);
     defer allocator.free(layouts.post);
     defer allocator.free(layouts.tags);
@@ -213,6 +223,7 @@ pub fn main() !void {
 
     tagmap = TagMap.init(allocator);
     defer tagmap.deinit();
+    // maneuver to deinit contained data structures.
     defer {
         var hashIter = tagmap.iterator();
         while (hashIter.next()) |*tag| {
