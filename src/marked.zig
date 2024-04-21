@@ -140,7 +140,7 @@ fn parser(markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: [
                     var buff: [4 * 1024]u8 = undefined;
                     while (true) {
                         const tag = list.popOrNull() orelse break;
-                        const bufw = try std.fmt.bufPrint(&buff, "<li><a href=\"tags/{s}.html\">[{s}]</a></li> ", .{ std.mem.trim(u8, tag, " "), std.mem.trim(u8, tag, " ") });
+                        const bufw = try std.fmt.bufPrint(&buff, "<li><a href=\"../tags/{s}.html\">[{s}]</a></li> ", .{ std.mem.trim(u8, tag, " "), std.mem.trim(u8, tag, " ") });
                         _ = try scribe.write(bufw);
                     }
                 } else {}
