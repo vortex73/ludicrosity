@@ -1,4 +1,7 @@
 /zig-out
+/res
+*.ico
+*css
 /tags
 /rendered
 /markdwns

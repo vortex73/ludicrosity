@@ -20,11 +20,12 @@ Ludicrosity looks for the following source tree:
 
 ```
 .
-├── markdwns
+├── content
 │   └── post0.md
-├── tags(coming soon)
+├── tags
 └── template
     └── template.html
+    └── segments(coming soon)
 
 ```
 
