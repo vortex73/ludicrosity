@@ -35,7 +35,7 @@ fn readLayouts(allocator: std.mem.Allocator, content_dir: fs.Dir) !Layouts {
     return Layouts{ .post = post, .tags = tags };
 }
 
-fn parseMetamatter(allocator: std.mem.Allocator, arena: std.mem.Allocator, content: []const u8) !Metamatter {
+fn parseMetamatter(allocator: std.mem.Allocator, content: []const u8) !Metamatter {
     var metadata = std.StringHashMap([]const u8).init(allocator);
     var tagList = std.ArrayList([]const u8).init(allocator);
     errdefer tagList.deinit();
@@ -48,14 +48,14 @@ fn parseMetamatter(allocator: std.mem.Allocator, arena: std.mem.Allocator, conte
             const val = parts.next() orelse continue;
             const key_trim = std.mem.trim(u8, key, " ");
             const val_trim = std.mem.trim(u8, val, " ");
-            const key_copy = try arena.dupe(u8, key_trim);
-            const val_copy = try arena.dupe(u8, val_trim);
+            const key_copy = try allocator.dupe(u8, key_trim);
+            const val_copy = try allocator.dupe(u8, val_trim);
             if (std.mem.eql(u8, key_copy, "tags")) {
                 // do tags here
                 var tags = std.mem.splitSequence(u8, val[0..], ",");
                 var int: usize = 0;
                 while (tags.next()) |tag| {
-                    const tag_copy = try arena.dupe(u8, tag);
+                    const tag_copy = try allocator.dupe(u8, tag);
                     try tagList.insert(int, tag_copy);
                     int += 1;
                 }
@@ -150,7 +150,7 @@ fn parser(markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: [
     _ = try scribe.write(pointer[0..]);
 }
 
-fn stroll(allocator: std.mem.Allocator, arena: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, tagmap: *TagMap) !void {
+fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, tagmap: *TagMap) !void {
     var markdown = std.ArrayList(u8).init(allocator);
     defer markdown.deinit();
 
@@ -170,7 +170,7 @@ fn stroll(allocator: std.mem.Allocator, arena: std.mem.Allocator, content_dir: f
             try reader.readAllArrayList(&markdown, 0xffff_ffff);
             defer markdown.clearRetainingCapacity();
 
-            metamatter = try parseMetamatter(allocator, arena, markdown.items);
+            metamatter = try parseMetamatter(allocator, markdown.items);
             var htmlFile = try createHtml(post.path);
             defer htmlFile.close();
             var writer = bufWriter(htmlFile.writer());
@@ -183,12 +183,14 @@ fn stroll(allocator: std.mem.Allocator, arena: std.mem.Allocator, content_dir: f
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
-    const allocator = gpa.allocator();
-    defer std.debug.assert(gpa.deinit() == .ok);
-    var arena = std.heap.ArenaAllocator.init(allocator);
+    // var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
+    // const gallocator = gpa.allocator();
+    // var logalloc = std.heap.loggingAllocator(gallocator);
+    // const allocator = logalloc.allocator();
+    // defer std.debug.assert(gpa.deinit() == .ok);
+    var arena = std.heap.ArenaAllocator.init(std.heap.raw_c_allocator);
     defer arena.deinit();
-    const aAlloc = arena.allocator();
+    const allocator = arena.allocator();
 
     // define a tagmap
     var tagmap: TagMap = undefined;
@@ -214,15 +216,20 @@ pub fn main() !void {
     tagmap = TagMap.init(allocator);
     defer tagmap.deinit();
     defer {
+        var metamatter = std.AutoHashMap(std.StringHashMap([]const u8), void).init(allocator);
+        defer metamatter.deinit();
         var hashIter = tagmap.iterator();
         while (hashIter.next()) |*tag| {
             defer tag.value_ptr.deinit();
-            const value = tag.value_ptr.items;
-            for (value) |*item| {
-                item.deinit();
+            for (tag.value_ptr.items) |*data| {
+                metamatter.put(data.*, undefined) catch break;
             }
         }
+        var metaIter = metamatter.iterator();
+        while (metaIter.next()) |*value| {
+            value.key_ptr.deinit();
+        }
     }
-    try stroll(allocator, aAlloc, content_dir, layouts, &tagmap);
+    try stroll(allocator, content_dir, layouts, &tagmap);
     try createTagFiles(content_dir, layouts.tags, &tagmap);
 }

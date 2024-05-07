@@ -1,0 +1,94 @@
+:root {
+    /* dark theme */
+	--normal-bg: rgb(16, 15, 15);
+	--normal-text: rgb(206, 205, 195);
+	--muted-text: rgb(135, 133, 128);
+	--link-text: rgb(58, 169, 159);
+	--selected-text: rgba(30, 95 ,91, 0.8);
+
+    /* light theme */
+	/* --normal-bg: rgb(255, 252, 240);
+	 * --normal-text: rgb(16, 15, 15);
+	 * --muted-text: rgb(111, 110, 105);
+	 * --link-text: rgb(36, 131, 123);
+	 * --selected-text: rgba(187,220, 206, 0.8); */
+}
+
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+html {
+	font-size: 14px;
+	font-family: monospace;
+	background: var(--normal-bg);
+	color: var(--normal-text);
+}
+
+body {
+	max-width: 48rem;
+	min-height: 100vh;
+	margin: auto;
+	padding: 2rem;
+	display: flex;
+	flex-direction: column;
+}
+
+header {
+	margin-top: 1rem;
+	display: flex;
+	align-items: center;
+}
+
+header .pfp {
+	width: 48px;
+	height: 48px;
+	margin-right: 1rem;
+}
+
+footer {
+	margin-top: auto;
+	padding-top: 2rem;
+	display: flex;
+	justify-content: space-between;
+	color: var(--muted-text);
+	font-size: 0.8rem;
+}
+
+h1 { font-size: 1.953rem; }
+h2 { font-size: 1.563rem; }
+h3 { font-size: 1.250rem; }
+
+/* don't apply to global h3 because
+ * the name in the header is a h3 */
+h1, h2, article h3 {
+	margin: 1.2em 0 0.6em 0;
+}
+
+p, pre, ul, ol {
+	margin: 1rem 0;
+	line-height: 1.5em;
+}
+
+ul {
+    display: inline;
+}
+
+a {
+	color: var(--link-text);
+	text-underline-offset: 0.25rem;
+}
+
+a:hover {
+	font-weight: bold;
+}
+
+::selection {
+	background: var(--selected-text);
+}
+
+@media (min-width: 561px) {
+	html { font-size: 16px; }
+}
