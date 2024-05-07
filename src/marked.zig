@@ -194,6 +194,10 @@ pub fn main() !void {
     // gpa used to detect memory leaks. Most likely temporary.
     // var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
     // const allocator = gpa.allocator();
+    // var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
+    // const gallocator = gpa.allocator();
+    // var logalloc = std.heap.loggingAllocator(gallocator);
+    // const allocator = logalloc.allocator();
     // defer std.debug.assert(gpa.deinit() == .ok);
     var arena = std.heap.ArenaAllocator.init(std.heap.raw_c_allocator);
     defer arena.deinit();
@@ -225,13 +229,18 @@ pub fn main() !void {
     defer tagmap.deinit();
     // maneuver to deinit contained data structures.
     defer {
+        var metamatter = std.AutoHashMap(std.StringHashMap([]const u8), void).init(allocator);
+        defer metamatter.deinit();
         var hashIter = tagmap.iterator();
         while (hashIter.next()) |*tag| {
             defer tag.value_ptr.deinit();
-            const value = tag.value_ptr.items;
-            for (value) |*item| {
-                item.deinit();
+            for (tag.value_ptr.items) |*data| {
+                metamatter.put(data.*, undefined) catch break;
             }
+        }
+        var metaIter = metamatter.iterator();
+        while (metaIter.next()) |*value| {
+            value.key_ptr.deinit();
         }
     }
     try stroll(allocator, content_dir, layouts, &tagmap);
