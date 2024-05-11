@@ -17,6 +17,14 @@ const Metamatter = struct {
 const Layouts = struct {
     post: []const u8,
     tags: []const u8,
+    list: []const u8,
+    index: []const u8,
+    fn deinit(self: *Layouts, allocator: std.mem.Allocator) void {
+        allocator.free(self.post);
+        allocator.free(self.tags);
+        allocator.free(self.list);
+        allocator.free(self.index);
+    }
 };
 
 const TagMap = std.StringHashMap(std.ArrayList(std.StringHashMap([]const u8)));
@@ -32,9 +40,15 @@ fn readLayouts(allocator: std.mem.Allocator, content_dir: fs.Dir) !Layouts {
     defer postFile.close();
     const tagsFile = try content_dir.openFile("../templates/tags.html", .{ .mode = .read_only });
     defer tagsFile.close();
+    const listFile = try content_dir.openFile("../templates/list.html", .{ .mode = .read_only });
+    defer listFile.close();
+    const indexFile = try content_dir.openFile("../templates/index.html", .{ .mode = .read_only });
+    defer indexFile.close();
     const post = try postFile.readToEndAlloc(allocator, 1024 * 1024);
     const tags = try tagsFile.readToEndAlloc(allocator, 1024 * 1024);
-    return Layouts{ .post = post, .tags = tags };
+    const list = try listFile.readToEndAlloc(allocator, 1024 * 1024);
+    const index = try indexFile.readToEndAlloc(allocator, 1024 * 1024);
+    return Layouts{ .post = post, .tags = tags, .list = list, .index = index };
 }
 
 // Parse Metamatter content
@@ -184,6 +198,10 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, t
             var writer = bufWriter(htmlFile.writer());
             defer writer.flush() catch std.log.err("Flush failed. Bring a plunger ;D", .{});
             // parse markdown now
+            if (std.mem.eql(u8, metamatter.metadata.get("type") orelse "", "index")) {
+                try parser(markdown.items[metamatter.index + 1 ..], &writer, metamatter, layouts.index);
+                continue;
+            }
             try parser(markdown.items[metamatter.index + 1 ..], &writer, metamatter, layouts.post);
             try collectTag(allocator, metamatter, tagmap);
         }
@@ -211,9 +229,8 @@ pub fn main() !void {
     defer content_dir.close();
 
     // load all layouts. Hardcoded for now, prolly make it more general purpose.
-    const layouts = try readLayouts(allocator, content_dir);
-    defer allocator.free(layouts.post);
-    defer allocator.free(layouts.tags);
+    var layouts = try readLayouts(allocator, content_dir);
+    defer layouts.deinit(allocator);
 
     // verify custom directories
     fs.cwd().makeDir("tags") catch |e| switch (e) {
