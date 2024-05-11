@@ -1,6 +1,6 @@
 ---
 title: Ludicrosity
-description: my experience writing a site generator optimized for speed.
+description: real fast.
 tags: zig,ssg,project
 type: post
 author: vortex
