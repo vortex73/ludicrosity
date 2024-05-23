@@ -71,8 +71,10 @@ fn parseMetamatter(allocator: std.mem.Allocator, content: []const u8) !Metamatte
                 // do tags here
                 var tags = std.mem.splitSequence(u8, val[0..], ",");
                 var int: usize = 0;
+                var new_tag: []const u8 = undefined;
                 while (tags.next()) |tag| {
-                    const tag_copy = try allocator.dupe(u8, tag);
+                    new_tag = std.mem.trim(u8, tag, " ");
+                    const tag_copy = try allocator.dupe(u8, new_tag);
                     try tagList.insert(int, tag_copy);
                     int += 1;
                 }
