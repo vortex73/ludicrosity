@@ -25,14 +25,14 @@ A static site generator in Zig
 
 ## TODO
 Its awesome but not perfect. Here's a list of things I need to get to at some point.
-   ```text
 
-   - [ ] Fix tagging
-   - [ ] Sorting Posts
-   - [ ] Searching through posts
-   - [ ] Making code more modular
+- [ ] Fix tagging
+- [ ] Salient error messages
+- [ ] Command line arguments
+- [ ] Sorting Posts
+- [ ] Searching through posts
+- [ ] Making code more modular
 
-   ```
 
 ## Building Ludicrosity
 All source code for ludicrosity is housed within one single `src/marked.zig` for ultimate simplicity.
