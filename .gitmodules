@@ -1,3 +1,6 @@
 [submodule "md4c"]
 	path = md4c
 	url = git@github.com:mity/md4c.git
+[submodule "zig-datetime"]
+	path = zig-datetime
+	url = https://github.com/frmdstryr/zig-datetime

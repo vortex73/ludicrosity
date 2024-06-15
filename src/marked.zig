@@ -1,4 +1,5 @@
 const std = @import("std");
+const datetime = @import("../zig-datetime/src/main.zig");
 const fs = std.fs;
 const io = std.io;
 const md = @cImport({
@@ -96,6 +97,19 @@ fn parseMetamatter(allocator: std.mem.Allocator, content: []const u8, path: []co
         }
     }
     return Metamatter{ .metadata = metadata, .tags = tagList, .index = 0 };
+}
+
+fn indexify() !void {
+    // order by chrono
+    // path and date available in metamatter
+    // we need to make-unique the entries in TagMap
+    // Use approach similar to AutoHashMap used in deinit maeuveor
+    //
+    // Instead, in stroll(), we can append all metamatter to an array and then apply a sorting algorithm.
+    // at the end of stroll(), we call this function and pass the sorted array.
+    // here we iterate through all of them and substitute into the snippet.
+    // then substitute this snippet into the main file.
+
 }
 
 // Create one html file per tag
