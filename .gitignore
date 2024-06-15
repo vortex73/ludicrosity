@@ -12,6 +12,7 @@
 /templates
 /MarkdownTest_1.0
 /zig-cache
+/.zig-cache
 *bak*
 *.html
 *.o
