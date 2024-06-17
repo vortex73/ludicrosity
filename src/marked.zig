@@ -1,10 +1,11 @@
 const std = @import("std");
-const datetime = @import("../zig-datetime/src/main.zig");
+const datetime = @import("datetime");
 const fs = std.fs;
 const io = std.io;
 const md = @cImport({
     @cInclude("md4c-html.h");
 });
+
 const mem = std.mem;
 
 const Metamatter = struct {
@@ -99,17 +100,21 @@ fn parseMetamatter(allocator: std.mem.Allocator, content: []const u8, path: []co
     return Metamatter{ .metadata = metadata, .tags = tagList, .index = 0 };
 }
 
-fn indexify() !void {
-    // order by chrono
-    // path and date available in metamatter
-    // we need to make-unique the entries in TagMap
-    // Use approach similar to AutoHashMap used in deinit maeuveor
-    //
-    // Instead, in stroll(), we can append all metamatter to an array and then apply a sorting algorithm.
-    // at the end of stroll(), we call this function and pass the sorted array.
-    // here we iterate through all of them and substitute into the snippet.
-    // then substitute this snippet into the main file.
+fn lessthanfn(context: void, lhs: Metamatter, rhs: Metamatter) bool {
+    _ = context;
+    const l = datetime.datetime.Date.parseIso(lhs.metadata.get("date") orelse "") catch return undefined;
+    const r = datetime.datetime.Date.parseIso(rhs.metadata.get("date") orelse "") catch return undefined;
+    return datetime.datetime.Date.lt(l, r);
+}
 
+fn indexify(metaList: std.ArrayList(Metamatter)) !void {
+    defer metaList.deinit();
+    // sort
+    const items = metaList.items;
+    mem.sort(Metamatter, items, {}, lessthanfn);
+    for (items) |item| {
+        std.debug.print("{s}\n", .{item.metadata.get("date") orelse ""});
+    }
 }
 
 // Create one html file per tag
@@ -210,13 +215,13 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, t
     defer markdown.deinit();
 
     var metamatter: Metamatter = undefined;
+    var metaList = std.ArrayList(Metamatter).init(allocator);
 
     var buffer: [fs.MAX_PATH_BYTES]u8 = undefined;
     var stroller = try content_dir.walk(allocator);
     defer stroller.deinit();
     while (try stroller.next()) |post| {
         if (post.kind == .file) {
-            std.debug.print("{s}\n", .{post.path});
             const path = try std.fmt.bufPrint(&buffer, "{s}", .{post.path});
             const fd = try content_dir.openFile(path, .{ .mode = .read_only });
             defer fd.close();
@@ -226,6 +231,7 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, t
             defer markdown.clearRetainingCapacity();
 
             metamatter = try parseMetamatter(allocator, markdown.items, post.path[0 .. post.path.len - 2]);
+            try metaList.append(metamatter);
             var htmlFile = try createHtml(post.path);
             defer htmlFile.close();
             var writer = bufWriter(htmlFile.writer());
@@ -243,6 +249,7 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, t
             try collectTag(allocator, metamatter, tagmap);
         }
     }
+    try indexify(metaList);
 }
 
 pub fn main() !void {
