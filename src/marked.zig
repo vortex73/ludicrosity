@@ -107,13 +107,45 @@ fn lessthanfn(context: void, lhs: Metamatter, rhs: Metamatter) bool {
     return datetime.datetime.Date.lt(l, r);
 }
 
-fn indexify(metaList: std.ArrayList(Metamatter)) !void {
+fn snipp(allocator: mem.Allocator, name: []const u8, meta: Metamatter, writer: anytype) !void {
+    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const file = try std.fmt.bufPrint(&buffer, "templates/snippets/{s}.html", .{name});
+    const handle = fs.cwd().openFile(file, .{ .mode = .read_only }) catch |e| {
+        std.log.err("snippet type {s} not defined", .{name});
+        return e;
+    };
+    var html = try handle.readToEndAlloc(allocator, 1024);
+    while (mem.indexOf(u8, html, "<!--")) |start| {
+        _ = try writer.*.write(html[0..start]);
+        if (mem.indexOf(u8, html, "-->")) |end| {
+            _ = try writer.write(meta.metadata.get(html[start + 4 .. end]) orelse "");
+            html = html[end + 3 ..];
+        }
+    }
+    _ = try writer.write(html[0..]);
+}
+
+fn indexify(allocator: mem.Allocator, metaList: std.ArrayList(Metamatter), layout: []const u8) !void {
     defer metaList.deinit();
     // sort
     const items = metaList.items;
     mem.sort(Metamatter, items, {}, lessthanfn);
-    for (items) |item| {
-        std.debug.print("{s}\n", .{item.metadata.get("date") orelse ""});
+    var file = try fs.cwd().createFile("rendered/list.html", .{});
+    defer file.close();
+    var writer = bufWriter(file.writer());
+    defer writer.flush() catch std.log.err("Write failed to list.html", .{});
+    var html = layout;
+    while (mem.indexOf(u8, html, "<!--@")) |start| {
+        _ = try writer.write(html[0..start]);
+        if (mem.indexOf(u8, html, "@-->")) |end| {
+            if (mem.eql(u8, html[start + 5 .. end], "list")) {
+                for (items) |item| {
+                    try snipp(allocator, html[start + 5 .. end], item, &writer);
+                }
+                html = html[end + 4 ..];
+            }
+            _ = try writer.write(html[0..]);
+        }
     }
 }
 
@@ -150,10 +182,16 @@ fn createTagFiles(dir: fs.Dir, html: []const u8, tagmap: *TagMap) !void {
 }
 
 // creates a new html file in the rendered dir and returns the path
-fn createHtml(path: []const u8) !fs.File {
+fn createHtml(path: fs.Dir.Walker.Entry) !fs.File {
     var buffer: [fs.MAX_PATH_BYTES]u8 = undefined;
-    const filePath = try std.fmt.bufPrint(&buffer, "./rendered/{s}html", .{path[0 .. path.len - 2]});
-    const htmlFile = try fs.cwd().createFile(filePath, .{});
+    const filePath = try std.fmt.bufPrint(&buffer, "./rendered/{s}html", .{path.path[0 .. path.path.len - 2]});
+    const htmlFile = fs.cwd().createFile(filePath, .{}) catch |e| switch (e) {
+        error.FileNotFound => {
+            _ = try fs.cwd().makePath(filePath[0..(filePath.len - path.basename.len)]);
+            return fs.cwd().createFile(filePath, .{});
+        },
+        else => return e,
+    };
     return htmlFile;
 }
 
@@ -222,6 +260,7 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, t
     defer stroller.deinit();
     while (try stroller.next()) |post| {
         if (post.kind == .file) {
+            std.debug.print("{s}\n", .{post.path});
             const path = try std.fmt.bufPrint(&buffer, "{s}", .{post.path});
             const fd = try content_dir.openFile(path, .{ .mode = .read_only });
             defer fd.close();
@@ -232,7 +271,7 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, t
 
             metamatter = try parseMetamatter(allocator, markdown.items, post.path[0 .. post.path.len - 2]);
             try metaList.append(metamatter);
-            var htmlFile = try createHtml(post.path);
+            var htmlFile = try createHtml(post);
             defer htmlFile.close();
             var writer = bufWriter(htmlFile.writer());
             defer writer.flush() catch std.log.err("Flush failed. Bring a plunger ;D", .{});
@@ -249,7 +288,7 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, t
             try collectTag(allocator, metamatter, tagmap);
         }
     }
-    try indexify(metaList);
+    try indexify(allocator, metaList, layouts.list);
 }
 
 pub fn main() !void {
