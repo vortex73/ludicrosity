@@ -17,47 +17,35 @@ const Metamatter = struct {
         self.tags.deinit();
     }
 };
-const Layouts = struct {
-    post: []const u8,
-    tags: []const u8,
-    list: []const u8,
-    index: []const u8,
-    about: []const u8,
-    fn deinit(self: *Layouts, allocator: std.mem.Allocator) void {
-        allocator.free(self.post);
-        allocator.free(self.tags);
-        allocator.free(self.list);
-        allocator.free(self.index);
-        allocator.free(self.about);
-    }
-};
 
 const TagMap = std.StringHashMap(std.ArrayList(std.StringHashMap([]const u8)));
-
+const LayMap = std.StringHashMap([]const u8);
 // custom buffered writer big enough for anything.
 pub fn bufWriter(underlying_stream: anytype) io.BufferedWriter(1024 * 128, @TypeOf(underlying_stream)) {
     return .{ .unbuffered_writer = underlying_stream };
 }
 
+fn postReader(allocator: mem.Allocator, path: []const u8) ![]const u8 {
+    const fd = fs.cwd().openFile(path, .{ .mode = .read_only }) catch |e| {
+        std.log.err("File {s} not defined", .{path});
+        return e;
+    };
+    defer fd.close();
+    const content = try fd.readToEndAlloc(allocator, 1024 * 1024);
+    return content;
+}
+
 // loads templates
 // CLEAN THIS!
-fn readLayouts(allocator: std.mem.Allocator, content_dir: fs.Dir) !Layouts {
-    const postFile = try content_dir.openFile("../templates/post.html", .{ .mode = .read_only });
-    defer postFile.close();
-    const tagsFile = try content_dir.openFile("../templates/tags.html", .{ .mode = .read_only });
-    defer tagsFile.close();
-    const listFile = try content_dir.openFile("../templates/list.html", .{ .mode = .read_only });
-    defer listFile.close();
-    const indexFile = try content_dir.openFile("../templates/index.html", .{ .mode = .read_only });
-    defer indexFile.close();
-    const aboutFile = try content_dir.openFile("../templates/about.html", .{ .mode = .read_only });
-    defer aboutFile.close();
-    const post = try postFile.readToEndAlloc(allocator, 1024 * 1024);
-    const about = try aboutFile.readToEndAlloc(allocator, 1024 * 1024);
-    const tags = try tagsFile.readToEndAlloc(allocator, 1024 * 1024);
-    const list = try listFile.readToEndAlloc(allocator, 1024 * 1024);
-    const index = try indexFile.readToEndAlloc(allocator, 1024 * 1024);
-    return Layouts{ .post = post, .tags = tags, .list = list, .index = index, .about = about };
+fn readLayouts(allocator: std.mem.Allocator, laymap: *LayMap, name: []const u8) ![]const u8 {
+    const layout = laymap.get(name) orelse blk: {
+        var buffer: [fs.max_path_bytes]u8 = undefined;
+        const path = try std.fmt.bufPrint(&buffer, "templates/{s}.html", .{name});
+        const content = try postReader(allocator, path);
+        try laymap.put(name, content);
+        break :blk content;
+    };
+    return layout;
 }
 
 // Parse Metamatter content
@@ -107,25 +95,21 @@ fn lessthanfn(context: void, lhs: Metamatter, rhs: Metamatter) bool {
     return datetime.datetime.Date.lt(l, r);
 }
 
-fn snipp(allocator: mem.Allocator, name: []const u8, meta: Metamatter, writer: anytype) !void {
+fn snipp(allocator: mem.Allocator, name: []const u8, meta: std.StringHashMap([]const u8), writer: anytype) !void {
     var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
     const file = try std.fmt.bufPrint(&buffer, "templates/snippets/{s}.html", .{name});
     const handle = fs.cwd().openFile(file, .{ .mode = .read_only }) catch |e| {
         std.log.err("snippet type {s} not defined", .{name});
         return e;
     };
-    var html = try handle.readToEndAlloc(allocator, 1024);
-    while (mem.indexOf(u8, html, "<!--")) |start| {
-        _ = try writer.*.write(html[0..start]);
-        if (mem.indexOf(u8, html, "-->")) |end| {
-            _ = try writer.write(meta.metadata.get(html[start + 4 .. end]) orelse "");
-            html = html[end + 3 ..];
-        }
-    }
-    _ = try writer.write(html[0..]);
+    defer handle.close();
+    const html = try handle.readToEndAlloc(allocator, 1024);
+    const newMatter = Metamatter{ .tags = undefined, .index = 0, .metadata = meta };
+    try parser(allocator, "", writer, newMatter, html);
 }
 
-fn indexify(allocator: mem.Allocator, metaList: std.ArrayList(Metamatter), layout: []const u8) !void {
+fn indexify(allocator: mem.Allocator, metaList: std.ArrayList(Metamatter), layouts: *LayMap) !void {
+    const layout = try readLayouts(allocator, layouts, "list");
     defer metaList.deinit();
     // sort
     const items = metaList.items;
@@ -134,23 +118,15 @@ fn indexify(allocator: mem.Allocator, metaList: std.ArrayList(Metamatter), layou
     defer file.close();
     var writer = bufWriter(file.writer());
     defer writer.flush() catch std.log.err("Write failed to list.html", .{});
-    var html = layout;
-    while (mem.indexOf(u8, html, "<!--@")) |start| {
-        _ = try writer.write(html[0..start]);
-        if (mem.indexOf(u8, html, "@-->")) |end| {
-            if (mem.eql(u8, html[start + 5 .. end], "list")) {
-                for (items) |item| {
-                    try snipp(allocator, html[start + 5 .. end], item, &writer);
-                }
-                html = html[end + 4 ..];
-            }
-            _ = try writer.write(html[0..]);
-        }
+    const html = layout;
+    for (items) |item| {
+        try parser(allocator, "", &writer, item, html);
     }
 }
 
 // Create one html file per tag
-fn createTagFiles(dir: fs.Dir, html: []const u8, tagmap: *TagMap) !void {
+fn createTagFiles(allocator: mem.Allocator, dir: fs.Dir, layouts: *LayMap, tagmap: *TagMap) !void {
+    const html = try readLayouts(allocator, layouts, "tags");
     var hash_iter = tagmap.iterator();
     while (hash_iter.next()) |entry| {
         const path = entry.key_ptr.*;
@@ -170,7 +146,7 @@ fn createTagFiles(dir: fs.Dir, html: []const u8, tagmap: *TagMap) !void {
                 if (mem.eql(u8, pointer[start + 4 .. end], "posts")) {
                     const value = entry.value_ptr.items;
                     for (value) |item| {
-                        try writer.writer().print("<h2><a href=\"/rendered/{s}html\"> {s}</a></h2>", .{ item.get("path") orelse "", item.get("title") orelse "" });
+                        try snipp(allocator, "list", item, &writer);
                     }
                 }
                 pointer = pointer[end + 3 ..];
@@ -209,9 +185,7 @@ pub fn collectTag(allocator: std.mem.Allocator, metamatter: Metamatter, tagmap: 
     metamatter.tags.deinit();
 }
 
-// Parse markdown content and write into html file
-// CLEAN THIS!
-fn parser(markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: []const u8) !void {
+fn render(markdown: []const u8, scribe: anytype) !void {
     const x = struct {
         fn callback(conv: [*c]const md.MD_CHAR, size: md.MD_SIZE, userdata: ?*anyopaque) callconv(.C) void {
             const file: *@TypeOf(scribe.*.writer()) = @ptrCast(@alignCast(userdata.?));
@@ -220,35 +194,49 @@ fn parser(markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: [
             }
         }
     };
+    _ = md.md_html(markdown.ptr, @intCast(markdown.len), x.callback, @ptrCast(@constCast(&(scribe.*.writer()))), @intCast(0), md.MD_HTML_FLAG_DEBUG);
+}
+
+// Parse markdown content and write into html file
+// CLEAN THIS!
+fn parser(allocator: mem.Allocator, markdown: []const u8, scribe: anytype, metamatter: Metamatter, html: []const u8) anyerror!void {
     var pointer: []const u8 = html;
     while (std.mem.indexOf(u8, pointer, "<!--")) |start_index| {
         _ = try scribe.write(pointer[0..start_index]);
-        if (std.mem.indexOf(u8, pointer, "-->")) |end_index| {
-            if (!std.mem.eql(u8, pointer[start_index + 4 .. end_index], "BODY")) {
-                if (std.mem.eql(u8, pointer[start_index + 4 .. end_index], "tags")) {
-                    var list = metamatter.tags;
-                    var buff: [4 * 1024]u8 = undefined;
-                    while (true) {
-                        const tag = list.popOrNull() orelse break;
-                        const bufw = try std.fmt.bufPrint(&buff, "<li><a href=\"../tags/{s}.html\">[{s}]</a></li> ", .{ std.mem.trim(u8, tag, " "), std.mem.trim(u8, tag, " ") });
-                        _ = try scribe.write(bufw);
-                    }
-                } else {}
-                _ = try scribe.write(metamatter.metadata.get(pointer[start_index + 4 .. end_index]) orelse "");
-                pointer = pointer[end_index + 3 ..];
-            } else {
-                _ = md.md_html(markdown.ptr, @intCast(markdown.len), x.callback, @ptrCast(@constCast(&(scribe.*.writer()))), @intCast(0), md.MD_HTML_FLAG_DEBUG);
-                pointer = pointer[end_index + 3 ..];
+        const end_index = mem.indexOf(u8, pointer, "-->") orelse err: {
+            std.log.err("unterminated commentline!", .{});
+            break :err start_index;
+        };
+        // check if its a snippet "<!--@param@-->"
+        const snipIndex = mem.indexOf(u8, pointer, "<!--@");
+        if (snipIndex == start_index) {
+            try snipp(allocator, pointer[start_index + 5 .. end_index - 1], metamatter.metadata, scribe);
+            pointer = pointer[end_index + 4 ..];
+            continue;
+        }
+        if (end_index == start_index) break;
+        const param = pointer[start_index + 4 .. end_index];
+        if (mem.eql(u8, param, "BODY")) {
+            try render(markdown, scribe);
+        } else if (mem.eql(u8, param, "tags")) {
+            var list = metamatter.tags;
+            var buff: [4 * 1024]u8 = undefined;
+            while (true) {
+                const tag = list.popOrNull() orelse break;
+                const bufw = try std.fmt.bufPrint(&buff, "<li><a href=\"/tags/{s}.html\">[{s}]</a></li> ", .{ std.mem.trim(u8, tag, " "), std.mem.trim(u8, tag, " ") });
+                _ = try scribe.write(bufw);
             }
         } else {
-            std.log.err("Unclosed CommentLine encountered in template file", .{});
+            const val = metamatter.metadata.get(param) orelse "";
+            _ = try scribe.write(val);
         }
+        pointer = pointer[end_index + 3 ..];
     }
     _ = try scribe.write(pointer[0..]);
 }
 
 // Directory walker
-fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, tagmap: *TagMap) !void {
+fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: *LayMap, tagmap: *TagMap) !void {
     var markdown = std.ArrayList(u8).init(allocator);
     defer markdown.deinit();
 
@@ -260,7 +248,6 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, t
     defer stroller.deinit();
     while (try stroller.next()) |post| {
         if (post.kind == .file) {
-            std.debug.print("{s}\n", .{post.path});
             const path = try std.fmt.bufPrint(&buffer, "{s}", .{post.path});
             const fd = try content_dir.openFile(path, .{ .mode = .read_only });
             defer fd.close();
@@ -276,31 +263,29 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: Layouts, t
             var writer = bufWriter(htmlFile.writer());
             defer writer.flush() catch std.log.err("Flush failed. Bring a plunger ;D", .{});
             // parse markdown now
-            if (std.mem.eql(u8, metamatter.metadata.get("type") orelse "", "index")) {
-                try parser(markdown.items[metamatter.index + 1 ..], &writer, metamatter, layouts.index);
-                continue;
+            const fileType = metamatter.metadata.get("type") orelse "";
+            if (mem.eql(u8, fileType, "")) {
+                std.log.err("Post 'type' parameter not defined on {s}", .{post.path});
+                break;
             }
-            if (std.mem.eql(u8, metamatter.metadata.get("type") orelse "", "about")) {
-                try parser(markdown.items[metamatter.index + 1 ..], &writer, metamatter, layouts.about);
-                continue;
-            }
-            try parser(markdown.items[metamatter.index + 1 ..], &writer, metamatter, layouts.post);
+            const layout = try readLayouts(allocator, layouts, fileType);
+            try parser(allocator, markdown.items[metamatter.index + 1 ..], &writer, metamatter, layout);
             try collectTag(allocator, metamatter, tagmap);
         }
     }
-    try indexify(allocator, metaList, layouts.list);
+    try indexify(allocator, metaList, layouts);
 }
 
 pub fn main() !void {
     // gpa used to detect memory leaks. Most likely temporary.
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
-    const gallocator = gpa.allocator();
+    //    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
+    //  const gallocator = gpa.allocator();
     // var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
     // const gallocator = gpa.allocator();
     // var logalloc = std.heap.loggingAllocator(gallocator);
     // const allocator = logalloc.allocator();
-    defer std.debug.assert(gpa.deinit() == .ok);
-    var arena = std.heap.ArenaAllocator.init(gallocator);
+    // defer std.debug.assert(gpa.deinit() == .ok);
+    var arena = std.heap.ArenaAllocator.init(std.heap.raw_c_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
@@ -312,8 +297,9 @@ pub fn main() !void {
     defer content_dir.close();
 
     // load all layouts. Hardcoded for now, prolly make it more general purpose.
-    var layouts = try readLayouts(allocator, content_dir);
-    defer layouts.deinit(allocator);
+    var layMap: LayMap = undefined;
+    layMap = LayMap.init(allocator);
+    defer layMap.deinit();
 
     // verify custom directories
     fs.cwd().makeDir("tags") catch |e| switch (e) {
@@ -343,6 +329,6 @@ pub fn main() !void {
             value.key_ptr.deinit();
         }
     }
-    try stroll(allocator, content_dir, layouts, &tagmap);
-    try createTagFiles(content_dir, layouts.tags, &tagmap);
+    try stroll(allocator, content_dir, &layMap, &tagmap);
+    try createTagFiles(allocator, content_dir, &layMap, &tagmap);
 }
