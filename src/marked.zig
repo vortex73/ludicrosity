@@ -94,11 +94,11 @@ fn lessthanfn(context: void, lhs: Metamatter, rhs: Metamatter) bool {
     _ = context;
     const l = datetime.datetime.Date.parseIso(lhs.metadata.get("date") orelse "") catch return undefined;
     const r = datetime.datetime.Date.parseIso(rhs.metadata.get("date") orelse "") catch return undefined;
-    return datetime.datetime.Date.lt(l, r);
+    return datetime.datetime.Date.gt(l, r);
 }
 
 fn snipp(allocator: mem.Allocator, name: []const u8, meta: std.StringHashMap([]const u8), writer: anytype, layouts: *LayMap, metaList: std.ArrayList(Metamatter)) !void {
-    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
     const file = try std.fmt.bufPrint(&buffer, "snippets/{s}", .{name});
     const html = try readLayouts(allocator, layouts, file);
     const newMatter = Metamatter{ .tags = undefined, .index = 0, .metadata = meta };
@@ -143,7 +143,7 @@ fn createTagFiles(allocator: mem.Allocator, dir: fs.Dir, layouts: *LayMap, tagma
     var hash_iter = tagmap.iterator();
     while (hash_iter.next()) |entry| {
         const path = entry.key_ptr.*;
-        var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        var buffer: [std.fs.max_path_bytes]u8 = undefined;
         const file = try std.fmt.bufPrint(&buffer, "../tags/{s}.html", .{path});
         var fd = try dir.createFile(file, .{});
         defer fd.close();
@@ -172,7 +172,7 @@ fn createTagFiles(allocator: mem.Allocator, dir: fs.Dir, layouts: *LayMap, tagma
 
 // creates a new html file in the rendered dir and returns the path
 fn createHtml(path: fs.Dir.Walker.Entry) !fs.File {
-    var buffer: [fs.MAX_PATH_BYTES]u8 = undefined;
+    var buffer: [fs.max_path_bytes]u8 = undefined;
     const filePath = try std.fmt.bufPrint(&buffer, "./rendered/{s}html", .{path.path[0 .. path.path.len - 2]});
     const htmlFile = fs.cwd().createFile(filePath, .{}) catch |e| switch (e) {
         error.FileNotFound => {
@@ -265,7 +265,7 @@ fn stroll(allocator: std.mem.Allocator, content_dir: fs.Dir, layouts: *LayMap, t
     var metamatter: Metamatter = undefined;
     var metaList = std.ArrayList(Metamatter).init(allocator);
 
-    var buffer: [fs.MAX_PATH_BYTES]u8 = undefined;
+    var buffer: [fs.max_path_bytes]u8 = undefined;
     var stroller = try content_dir.walk(allocator);
     defer stroller.deinit();
     while (try stroller.next()) |post| {
