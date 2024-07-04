@@ -36,7 +36,6 @@ fn postReader(allocator: mem.Allocator, path: []const u8) ![]const u8 {
 }
 
 // loads templates
-// CLEAN THIS!
 fn readLayouts(allocator: std.mem.Allocator, laymap: *LayMap, name: []const u8) ![]const u8 {
     const pos = mem.lastIndexOf(u8, name, "/") orelse 0;
     const layout = laymap.get(name[pos..]) orelse blk: {
