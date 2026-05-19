@@ -2,10 +2,11 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const optimizer = b.standardOptimizeOption(.{});
+    const target = b.standardTargetOptions(.{});
     const exe = b.addExecutable(.{
         .name = "ludicrous",
         .root_source_file = b.path("src/marked.zig"),
-        .target = b.host,
+        .target = target,
         .optimize = optimizer,
     });
 
@@ -19,5 +20,7 @@ pub fn build(b: *std.Build) void {
         "md4c/src/entity.c",
         "md4c/src/md4c-html.c",
     } });
+    // exe.want_lto = false;
+    // exe.use_llvm = false;
     b.installArtifact(exe);
 }
